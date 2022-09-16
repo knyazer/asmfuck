@@ -18,15 +18,17 @@ nothing_in_stdin_message: .asciz "\n\033[1;31mError: Nothing in stdin. This migh
 
 incomplete_loop_message: .asciz "\n\033[1;31mError: Incomplete loop in the compressed brainfuck code. Either you have a problem with you brainfuck code, or something went really wrong with the compression algorithm. This error means that at the '[' the data pointer had 0 value, so we started to search for loop closing statement ']', but encountered the end of code before finding any. Really bad error. \033[0m\n"
 
-RLE_placeholder: .asciz "%ld%c\n"
+RLE_placeholder: .asciz "%ld%c"
 
 char_placeholder: .asciz "%c"
+
+found_a_leaf_message: .asciz "\n Found a leaf! \n"
 
 int_placeholder: .asciz "%d->"
 
 delimiter: .asciz "\n\n---------------------------\n\n"
 
-test_text: .asciz "tests/hello.b"
+test_text: .asciz "\n test - test \n"
 
 .global main
 
@@ -123,10 +125,36 @@ read_block:
     movq %rsp, %r9
     
 add_new_block:
-    movq $0, (%r8)            # Clear the value of the first block
-    
     # Copy the raw command to the compressed program
     movb (%r9), %r10b
+    
+    # Allow only correct brainfuck symbold
+    cmpb $'+', %r10b            
+    je not_skip_instruction
+    cmpb $'-', %r10b
+    je not_skip_instruction
+    cmpb $'<', %r10b
+    je not_skip_instruction
+    cmpb $'>', %r10b
+    je not_skip_instruction
+    cmpb $'.', %r10b
+    je not_skip_instruction
+    cmpb $',', %r10b
+    je not_skip_instruction
+    cmpb $'[', %r10b
+    je not_skip_instruction
+    cmpb $']', %r10b
+    je not_skip_instruction
+
+    # If we are here, then we want to skip instruction
+    addq $1, %r9
+    cmpq -16(%rbp), %r9     # Check if we are at the end of the raw program
+    je finish_RLE           # If we are, then finish the compression
+    
+    jmp add_new_block   # otherwise - skip the instruction and continue
+
+not_skip_instruction:
+    movq $0, (%r8)            # Clear the value of the first block
     movb %r10b, 4(%r8)
 
 move_raw_pointer:
@@ -135,7 +163,6 @@ move_raw_pointer:
     
     movb (%r9), %r10b       # Save the current command to temporary register
     cmpq -16(%rbp), %r9     # Check if we are at the end of the raw program
-    
     je finish_RLE           # If we are, then finish the compression
     
     # We want to have only singular [ or ] in the blocks of compressed program, as it makes readability better, and execution much less complicated, though overall almost not affecting anything else
@@ -182,8 +209,7 @@ looping_around_for_RLE_printing:
     movq $delimiter, %rdi
     call printf
 
-    # Go directly to execution of the program from RLE step
-    jmp start_the_execution
+    #jmp start_the_execution
 
 # Now, here is the most complex part of the program: loop optimization
 # The idea is decently simple: the majority of the time spent in the program is in the loops, so we want to optimize them as much as possible. 
@@ -195,9 +221,10 @@ looping_around_for_RLE_printing:
 # *1 += counter
 # *0 = 0
 # There are some important properties that must be met:
-# 1. Counter is in the same place always. This could be checked by counting all the arrows in the loop, and if their sum is 0, then the counter is in the same location. Important: there must be no nested loops, as loops introduce arbitrary pointer movements, for example +>+>+<[>[-<]] is zero arrow sum loop, but it do not have counter in the same location.
-# 2. No nested loops (induced from 1)
+# 1. Counter is in the same place always. This could be checked by counting all the arrows in the loop, and if their sum is 0, then the counter is in the same location. 
+# 2. No nested loops, as loops allow arbitrary pointer movement, and we cannot predict where the counter will be after the iteration.
 # 3. No input in the loop, as input introduces uncertainty.
+# 4. Only single decrement of the loop counter. Otherwise - weird things could happend, so we don't want to deal with them (like overflow properties are not clearly defined, etc).
 # That is all. Also, the interesting fact is that we can optimize loops partially:
 # Consider the loop [->+<] again. We can unpack the loop using following technique:
 # (/>*<)
@@ -206,14 +233,270 @@ looping_around_for_RLE_printing:
 # ) set value at the corresponding parentheses to 0
 # Now, suppose we have nested loops:
 # We apply optimization to the bottommost loop [->+(/>*<)<]
-# It works fine, but can we apply optimization to the parent loop? I think that we can, but it is complicated. Probably we can isolate parts which do not depend on the memory state from the dependent ones(actually, only () and [])
-# Some other notes: if we encounter loop [-] we can quickly replace it to just set 0, as it is a common alogrithm in the brainfuck code
+# It works fine, but can we apply optimization to the parent loop? I think that we can, but it is complicated. 
+# Probably we can isolate parts which do not depend on the memory state from the dependent ones(actually, only () and [])
+# Some other notes: if we encounter loop [-] we can quickly replace it to just set 0, as it is a common alogrithm in the brainfuck code. Use 0 instruction then
+# 0 instruction is allowed to be optimized. Setting the variable to 0 do not introduce any dependency on data, so it completely fine to use it. The optimized version of 0 instruction is same 0, which means that efficient brainfuck programs will not ever do that. Indeed, while to reset variable to 0 in the loop, if after the first iteration it will be already resat? However, just in case, include 0 instruction.
+
+
+# Some thoughts:
+# The optimization of this sort can be considered basic, as they use the fact that the things inside brainfuck loop do not depend on the memory state at all.
+# So, whatever is inside the loop, it does not have any dependency on the previous iteration, thus we should be able to apply 'perfect' parallelization to it.
+# In case of basic instructions (standart brainfuck syntax), we can parallelize them with multiplication. The problems start from this point, as 
+# the loops which has nested 'optimized' loop inside them introduce a data dependency: indeed, loops are dependent on its corresponding counter.
+# Now we have a problem: how to parallelize loops with data dependency?
+# Suppose we have a loop [ first-instr-block (optimized-loop) second-instr-block ]. (there are no loops of any kind in the instruction blocks).
+# We can parallelize the basic-syntax-instructions, but what about the optimized-loop?
+# Lets ignore it for now, and focus on the optimization of partially-optimizable loops, like provided in the example above. 
+# The representation would be: optimized(first-instr-block) [ X ] optimized(second-instr-block)
+# In X we want to include all operations happening with the location corresponding to the counter of the nested loop. 
+# This allows as to move second block to the beginning, as the instructions from there do not affect the counter, and we can move them outside of the loop.
+# Now the structure is: optimized(first-instr-block) optimized(second-instr-block) [ first-ops-with-the-X-counter X last-ops-with-the-X-counter this-loop-counter-change ] . 
+# IMPORTANT: Condition: the only operation made on the parent loop counter is single decrement.
+
+# This stage of optimization of the not nested loops is called leaf optimization, as these loops in the tree of loops are the leaves.
+leaf_optimization:
+    # iterate over the whole code, and count the brackets.
+    # At each closing bracket, check if the corresponding bracket has flag 'nlf' set. 'nlf' because 'not leaf'. 
+    # If it is set, then we have a loop which can be optimized, and for now just print something, and set the flag 'nlf' for all the brackets in the stack
+    # If it is set, just continue like nothing happened
+    
+    # Let's store pointer to the current block in RLE in r12, and pointer to the block in LO in r13
+    movq -16(%rbp), %r12
+    movq -40(%rbp), %r13
+    
+    # Store current stack pointer in r14, as the brackets data will lie between this value and rsp:
+    # [ r14           ]
+    # [ brackets data ]
+    # [ rsp           ]
+    movq %rsp, %r14
+
+main_lo_loop:
+    # Put the current symbol into rax
+    movb 4(%r12), %r9b
+    
+    cmpb $'[', %r9b
+    je lo_opening_bracket
+
+    cmpb $']', %r9b
+    je lo_closing_bracket
+
+lo_condition_end:
+
+    # If it is not a bracket, then just move to the next block
+    addq $8, %r12
+
+    # Check if we are not at the end of the RLE program
+    cmpq -32(%rbp), %r12
+    jne main_lo_loop
+
+    # otherwise, we are done with leaf optimization, so lets start the execution
+    jmp start_the_execution
+
+
+found_leaf:
+    # Try to detect zeros
+#    jmp zero_detection
+#zero_detection_ret:
+    
+    # Count the arrows (total ptr change) in the loop
+    # Simultaneously calculate the iteration step of the counter
+    # Let the pointer to the inner-loop instruction be in rcx, as found leaf is called when the rcx points to the correct opening bracket.
+    # Lets store the current pointer delta (arrow sum) in rbx, and the counter step in rdx
+    movq %rcx, %r15 # Save the pointer to the opening bracket for future use
+    movq $0, %rdx
+    movq $0, %rbx
+    addq $8, %rcx
+
+lo_check_correctness_loop:
+    # Check that we haven't reached the closing bracket yet
+    cmpq %rcx, %r12
+    je finish_checking_correctness  # If we have reached the end, break the loop
+
+    # Save symbol in rax
+    movb 4(%rcx), %al
+    cmpb $'>', %al
+    je lo_arrow_right
+    cmpb $'<', %al
+    je lo_arrow_left
+    
+    # If there is an input into the loop - do not optimize the loop
+    cmpb $',', %al
+    je lo_condition_end
+    
+    # If there is an output from the loop - do not optimize
+    cmpb $'.', %al
+    je lo_condition_end
+
+    cmpq $0, %rbx   # Check that the arrow sum is zero
+    je lo_arrow_sum_is_zero 
+
+arrow_if_end:
+    addq $8, %rcx
+    jmp lo_check_correctness_loop
+
+lo_arrow_right:
+    addl (%rcx), %ebx
+    jmp arrow_if_end
+
+lo_arrow_left:
+    subl (%rcx), %ebx
+    jmp arrow_if_end
+
+lo_arrow_sum_is_zero:
+    cmpb $'+', %al
+    je lo_plus
+    cmpb $'-', %al
+    je lo_minus
+    jmp arrow_if_end
+
+lo_plus:
+    addl (%rcx), %edx
+    jmp arrow_if_end
+
+lo_minus:
+    subl (%rcx), %edx
+    jmp arrow_if_end
+
+
+finish_checking_correctness:    
+    cmpl $-1, %edx  # Check that the counter step is exactly -1
+    jne lo_condition_end # If condition is not met -> end the optimization of the loop
+
+    cmpl $0, %ebx    # Check that the arrow sum is zero
+    jne lo_condition_end # If condition is not met -> end the optimization of the loop
+    
+    # If we are here, we found a leaf loop, which can be optimized
+    movq $0, %rax
+    movq $found_a_leaf_message, %rdi
+    call printf
+
+    # The *optimization* routine is simple: we just replace brackets [] with parentheses (), + with *, - with /.    # Let's move the pointer to the [ in rax, and pointer to the ] in rbx
+    movq %r15, %rax
+    movq %r12, %rbx
+    
+    # Not iterate over all the elements between the brackets, and replace them
+    # rcx is the counter, again
+    movq %rax, %rcx
+
+lo_replacement_loop:
+    # Check that we haven't reached the closing bracket yet    # Save symbol in r8
+    movb 4(%rcx), %r8b
+    cmpb $'[', %r8b
+    je lo_replacement_opening_bracket
+    cmpb $']', %r8b
+    je lo_replacement_closing_bracket
+    cmpb $'+', %r8b
+    je lo_replacement_plus
+    cmpb $'-', %r8b
+    je lo_replacement_minus
+
+lo_replacement_if_end:
+    # Check if we need to exit the loop
+    cmpq %rcx, %rbx
+    je finish_lo_replacement_loop  # If we have reached the end, break the loop
+    
+    addq $8, %rcx
+    jmp lo_replacement_loop
+
+
+lo_replacement_opening_bracket:
+    movb $'(', 4(%rcx)
+    jmp lo_replacement_if_end
+
+lo_replacement_closing_bracket:
+    movb $')', 4(%rcx)
+    jmp lo_replacement_if_end
+
+lo_replacement_plus:
+    movb $'*', 4(%rcx)
+    jmp lo_replacement_if_end
+
+lo_replacement_minus:
+    movb $'/', 4(%rcx)
+    jmp lo_replacement_if_end
+
+
+finish_lo_replacement_loop:
+    # Now we are probably entirely done with the loop
+    jmp lo_condition_end
+
+
+
+lo_opening_bracket:
+    # Set the flag 'nlf' for all the parent brackets, until bracket with the flag encountered
+    jmp set_stack_brackets_nlf_flag 
+ret_ssbnf:
+    # If it is an opening bracket, then push the pointer to it to the stack, twice for the stack to be aligned
+    pushq %r12
+    pushq %r12
+    jmp lo_condition_end
+
+
+lo_closing_bracket:
+    # If it is a closing bracket, then pop the pointer to the opening bracket from the stack
+    popq %rcx
+    popq %rcx
+    
+    # Check that 'nlf' flag is not set
+    cmpb $0, 5(%rcx)
+    je found_leaf   # If so jump to subroutine 'found_leaf'
+    # otherwise, do nothing, and continue
+    jmp lo_condition_end
+
+set_stack_brackets_nlf_flag:
+    # pointer to the current bracket in rcx
+    movq %rsp, %rcx
+ssbnf_loop:
+
+    cmpq %r14, %rcx     # if we are at the end of the brackets list, then we are done
+    je end_ssbnf      # otherwise, continue setting
+
+    # Load the address of the current bracket block into rdx
+    movq (%rcx), %rdx
+
+    cmpb $1, 5(%rdx)    # $1 is nlf flag
+    je end_ssbnf        # if it is set, then we are done
+    
+    # otherwise, set the flag and increase the counter by 16, as the values aligned to 16 bytes
+    movb $1, 5(%rdx)
+    addq $16, %rcx
+    
+    jmp ssbnf_loop
+end_ssbnf:
+    jmp ret_ssbnf
+
+
+
 
 start_the_execution:
+    # Now we can print the processed RLE once more
+    movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
+    
+looping_around_for_RLE_printing_2:
+    movq $0, %rax           # Printf flag, no SIMD
+    movq $RLE_placeholder, %rdi # Printf format string
+    movq $0, %rsi           # Zerofy the rsi register
+    movl (%rbx), %esi       # Number of repetitions
+    movq $0, %rdx           # Zerofy the rdx register
+    movb 4(%rbx), %dl      # Command
+    call printf
+    
+    addq $8, %rbx          # Move to the next block
+    cmpq -32(%rbp), %rbx   # Check that we are not at the end of the RLE program
+    jne looping_around_for_RLE_printing_2
+    
+    # Print delimiter
+    movq $0, %rax
+    movq $delimiter, %rdi
+    call printf
+
+
     # Now, we can execute the program
     # Lets define some registers:
-    # %r12 - pointer to the current code block
+    # %r12 - pointer to the current instruction block
     # %r13 - brainfuck memory pointer
+    # %r14 - number of repetitions for current optimized loop
     movq -16(%rbp), %r12
     movq -24(%rbp), %r13
     
@@ -250,10 +533,48 @@ looping_around_for_execution:
 
     cmpb $']', %r10b
     je bf_loop_end
+    
+    # The section with complex (jit compiled) instructions
+    cmpb $'(', %r10b
+    je bf_complex_start
+
+    cmpb $')', %r10b
+    je bf_complex_end
+
+    cmpb $'*', %r10b
+    je bf_complex_mul
+
+    cmpb $'/', %r10b
+    je bf_complex_sub_mul
 
     # If we are here, then we have an unknown command, which we just ignore
     jmp if_else_end_for_execution
     
+    # Here are the definitions of complex brainfuck commands
+bf_complex_start:
+    movq $0, %r14   # Clear up the data
+    movb (%r13), %r14b # Save the current data pointer to specific register
+    jmp if_else_end_for_execution
+
+bf_complex_end:
+    # nothing to do here
+    jmp if_else_end_for_execution
+
+bf_complex_mul:
+    # current_cell += counter * repetitions
+    movq %rdi, %rax     # Move the number of repetitions to rax
+    mul %r14          # Multiply it by the counter
+    add %rax, (%r13)    # Add it to the current cell
+    jmp if_else_end_for_execution
+
+bf_complex_sub_mul:
+    # current_cell -= counter * repetitions
+    movq %rdi, %rax     # Move the number of repetitions to rax
+    mul %r14          # Multiply it by the counter
+    sub %rax, (%r13)    # Subtract it from the current cell
+    jmp if_else_end_for_execution
+
+
     # Here are the definitions of brainfuck commands
 bf_add:
     addb %dil, (%r13)
