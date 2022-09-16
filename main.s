@@ -228,32 +228,18 @@ looping_around_for_execution:
     
     # Here are the definitions of brainfuck commands
 bf_add:
-    addq %rdi, (%r13)
+    addb %dil, (%r13)
     jmp if_else_end_for_execution
     
 bf_sub:
-    subq %rdi, (%r13)
+    subb %dil, (%r13)
     jmp if_else_end_for_execution
 
 bf_right:
     addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
-    addq %rdi, %r13
     jmp if_else_end_for_execution
 
 bf_left:
-    subq %rdi, %r13
-    subq %rdi, %r13
-    subq %rdi, %r13
-    subq %rdi, %r13
-    subq %rdi, %r13
-    subq %rdi, %r13
-    subq %rdi, %r13
     subq %rdi, %r13
     jmp if_else_end_for_execution
 
@@ -263,7 +249,8 @@ bf_print_loop:
     # Printf corrupts, but we kinda do not care, as all important things are callee saved
     movq $0, %rax # No SIMD
     movq $char_placeholder, %rdi # string to output
-    movq (%r13), %rsi # value to output
+    movq $0, %rsi # zerofy rsi to remove noise
+    movb (%r13), %sil # value to output
     call printf
         
     decq %r15
@@ -284,11 +271,13 @@ bf_read_loop:
     subq $16, %rsp          # Allocate two bytes for temporary storage of the read value
     # when we read something the first char is what we need, and the second one is \n which we ignore
     movq %rsp, %rsi         # Address of the buffer
-    movq %rsp, %r13         # Load value from the temporary location to the brainfuck memory
-    addq $16, %rsp          # Deallocate the temporary storage
 
     syscall
-
+    
+    movb (%rsp), %al      # Move the read value to the temporary register
+    movb %al, (%r13)       # Load value from the temporary register to the brainfuck memory
+    addq $16, %rsp          # Deallocate the temporary storage
+    
     cmpq $0, %rax           # Check if everything works as expected
     jl cannot_read_from_stdin # If there is an error, show error message and exit
     je nothing_in_stdin     # If there is nothing in stdin, show error message and exit (hmm?)
@@ -300,19 +289,17 @@ bf_read_loop:
     jmp if_else_end_for_execution
 
 bf_loop_start:
-    cmpq $0, (%r13)         # Check if the current memory cell is zero
+    cmpb $0, (%r13)         # Check if the current memory cell is zero
     je bf_search_for_loop_end_start   # If it is, iterate to the end of the loop without executing anything
-    #pushq %r12                  # If it is not, push the current brainfuck instruction pointer
-    #pushq %r12
+    pushq %r12                  # If it is not, push the current brainfuck instruction pointer
+    pushq %r12
     jmp if_else_end_for_execution # and continue execution
 
 bf_loop_end:
-    cmpq $0, (%r13)         # Check if the current memory cell is zero
-    jne bf_search_for_loop_start_start # If it is not, iterate to the start of the loop without executing anything
-    jmp if_else_end_for_execution # otherwise continue executiong
-    #je pop_the_pointer_to_the_loop_start # If it is, then pop the pointer and continue main loop
-    #movq (%rsp), %r12               # If it is not, then set current instruction pointer to the saved one
-    #jmp if_else_end_for_execution # and continue execution
+    cmpb $0, (%r13)         # Check if the current memory cell is zero
+    je pop_the_pointer_to_the_loop_start # If it is, then pop the pointer and continue main loop
+    movq (%rsp), %r12               # If it is not, then set current instruction pointer to the saved one
+    jmp if_else_end_for_execution # and continue execution
     
 pop_the_pointer_to_the_loop_start:
     addq $16, %rsp
@@ -332,54 +319,25 @@ bf_search_for_loop_end:
 
     # Count all the brackets, when the sum is 0 - we found the end of the loop
     cmpb $']', 4(%r12) 
-    je brackets_counter_dec_1
+    je brackets_counter_dec
     cmpb $'[', 4(%r12)
-    je brackets_counter_inc_1
+    je brackets_counter_inc
         
     # If we are here, the current block is not a bracket, so repeat the cycle
     jmp bf_search_for_loop_end
 
-# Here is the code to search for the corresponding opening bracket
-bf_search_for_loop_start_start:
-    # The preparation step is to set %r15, which is a counter for brackets, to 1 (as it is single closing bracket)
-    movq $1, %r15
-bf_search_for_loop_start:
-    subq $8, %r12           # Move to the previous block
-        
-    # Count all the brackets, when the sum is 0 - we found the beginning of the loop
-    cmpb $']', 4(%r12)
-    je brackets_counter_inc_2
-    cmpb $'[', 4(%r12)
-    je brackets_counter_dec_2
-        
-    # If we are here, the current block is not a bracket, so repeat the cycle
-    jmp bf_search_for_loop_start
-
-
-brackets_counter_dec_1:
+brackets_counter_dec:
     decq %r15
     jmp bf_search_for_loop_end_sum_check
 
-brackets_counter_inc_1:
+brackets_counter_inc:
     incq %r15
     jmp bf_search_for_loop_end_sum_check
-
-brackets_counter_dec_2:
-    decq %r15
-    jmp bf_search_for_loop_start_sum_check
-
-brackets_counter_inc_2:
-    incq %r15
-    jmp bf_search_for_loop_start_sum_check
 
 bf_search_for_loop_end_sum_check:
     cmpq $0, %r15          # Check if the sum is 0, if so - we have found the end of the loop, ignoring all nested
     jne bf_search_for_loop_end # If it is not, then continue searching
     jmp if_else_end_for_execution # If it is, then continue execution (to the next block, so ignore the close loop command)
-
-bf_search_for_loop_start_sum_check:
-    cmpq $0, %r15          # Check if the sum is 0, if so - we have found the end of the loop, ignoring all nested
-    jne bf_search_for_loop_start # If it is not, then continue searching
     jmp if_else_end_for_execution # If it is, then continue execution (to the next block, so ignore the close loop command)
     
 ### IMPORTANT ###
