@@ -512,23 +512,19 @@ looping_around_for_RLE_printing_2:
     # %r14 - number of repetitions for current optimized loop
     movq -16(%rbp), %r12
     movq -24(%rbp), %r13
+    # zerofi temprorary registers
     
 looping_around_for_execution:
-    # zerofi temprorary registers
     movq $0, %r10
-    movq $0, %rdi
-    
-    # Put the command and number of repetitions into separate temporary registers, %r10b and %edi
+    # Put the command into the r10 register
     movb 4(%r12), %r10b
-    movl (%r12), %edi
     # GDB command to debug: printf "%ld %c, bmem value: %ld, bmem_ptr: %ld \n\n", $rdi, $r10, *(uint64_t*)$r13, $r13 - *(uint64_t*)($rbp-24)
-    # A huge if else statement, which executes the command
-
+    # Jump to the correct command
     shlq $3, %r10
     movq jumptable(%r10), %r10
     jmp *%r10
     
-    # If we are here, then we have an unknown command, which we just ignore
+    # If we are here, then we failed somehow, but as it was not fatal, then just continue pretending nothing happened
     jmp if_else_end_for_execution
     
     # Here are the definitions of complex brainfuck commands
@@ -542,6 +538,7 @@ bf_complex_end:
     jmp if_else_end_for_execution
 
 bf_complex_mul:
+    movl (%r12), %edi
     # current_cell += counter * repetitions
     movq %rdi, %rax     # Move the number of repetitions to rax
     mul %r14          # Multiply it by the counter
@@ -549,6 +546,7 @@ bf_complex_mul:
     jmp if_else_end_for_execution
 
 bf_complex_sub_mul:
+    movl (%r12), %edi
     # current_cell -= counter * repetitions
     movq %rdi, %rax     # Move the number of repetitions to rax
     mul %r14          # Multiply it by the counter
@@ -558,23 +556,28 @@ bf_complex_sub_mul:
 
     # Here are the definitions of brainfuck commands
 bf_add:
+    movl (%r12), %edi
     addb %dil, (%r13)
     jmp if_else_end_for_execution
     
 bf_sub:
+    movl (%r12), %edi
     subb %dil, (%r13)
     jmp if_else_end_for_execution
 
 bf_right:
+    movl (%r12), %edi
     addq %rdi, %r13
     jmp if_else_end_for_execution
 
 bf_left:
+    movl (%r12), %edi
     subq %rdi, %r13
     jmp if_else_end_for_execution
 
 bf_print:
-    movq %rdi, %r15 # r15 as counter as rdi used
+    movq $0, %r15
+    movl (%r12), %r15d # Counter is the number of repetitions
 bf_print_loop:
     # Printf corrupts, but we kinda do not care, as all important things are callee saved
     movq $0, %rax # No SIMD
@@ -592,8 +595,9 @@ bf_print_loop:
 bf_read:
     # While it seems inadequate, our compressed version should be always the same as uncompressed, so we repeat reading char the required number of times. 
         
-    # Counter is in %rdi (%edi to be exact), which we use, so move it to %r15
-    movq %rdi, %r15
+    # Counter is in %r15 (%edi to be exact), which we use, so move it to %r15
+    movq $0, %r15
+    movl (%r12), %r15d # Counter is the number of repetitions
 bf_read_loop:
     movq $0, %rax           # Read flag
     movq $0, %rdi           # stdin file descriptor
