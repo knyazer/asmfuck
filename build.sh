@@ -1,3 +1,3 @@
 #!/bin/sh
 
-as -o main.o main.s && ld -o main main.o
+gcc -fno-pie -no-pie -o main main.s
