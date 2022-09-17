@@ -34,7 +34,7 @@ delimiter: .asciz "\n\n---------------------------\n\n"
 
 test_text: .asciz "\n test - test \n"
 
-.global _start
+.global main
 
 # The perfomace profiler I prefer is callgrind + kcachegrind
 # The way you use them is to firstly run
@@ -66,10 +66,10 @@ test_text: .asciz "\n test - test \n"
 # A - add the marked value to value at data pointer exactly twice
 # S - subtract the marked value from value at data pointer exactly twice
 
-_start:
+main:
     # these two lines are for loading the argv and argc without stdlib
-    popq %rdi
-    movq %rsp, %rsi
+    #popq %rdi
+    #movq %rsp, %rsi
 
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
@@ -810,12 +810,12 @@ if_else_end_for_execution:
 end:
     mov     $60, %rax               # system call 60 is exit
     movq $0, %rdi              # we want return code 0
-    syscall 
+    call exit #syscall 
 
 fail:
     movq $1, %rdi
     mov $60, %rax
-    syscall
+    call exit #syscall
 
 # Some error messages
 # Remove the first jmp to see them
