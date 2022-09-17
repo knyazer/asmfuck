@@ -1,3 +1,3 @@
 #!/bin/sh
 
-gcc -fno-pie -no-pie -g main.s -o main && ./main $1 $2 $3
+as -o main.o main.s && ld -o main main.o && ./main $1

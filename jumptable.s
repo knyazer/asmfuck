@@ -26,7 +26,6 @@ jumptable:
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
-    .quad bf_sub
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
@@ -35,6 +34,7 @@ jumptable:
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
+    .quad bf_complex_zero
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
@@ -66,6 +66,7 @@ jumptable:
     .quad bf_right
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
+    .quad bf_complex_double_mul
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
@@ -83,8 +84,7 @@ jumptable:
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
-    .quad if_else_end_for_execution
-    .quad if_else_end_for_execution
+    .quad bf_complex_sub_double_mul
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
@@ -98,6 +98,7 @@ jumptable:
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
+    .quad bf_complex_single_mul
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
@@ -115,8 +116,7 @@ jumptable:
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
-    .quad if_else_end_for_execution
-    .quad if_else_end_for_execution
+    .quad bf_complex_sub_single_mul
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
     .quad if_else_end_for_execution
