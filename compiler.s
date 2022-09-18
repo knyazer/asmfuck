@@ -3,8 +3,8 @@
 child_msg: .asciz "I am a child! \n"
 parent_msg: .asciz "I am a parent! \n"
 waiting_msg: .asciz "Waiting for child to finish... \n"
-child_alive_from_inside: .asciz "I am alive!!!\n"
-error_at_child_msg: .asciz "Error at child process! \n"
+child_alive_from_inside: .asciz "Executable not found. \n"
+error_at_child_msg: .asciz "Error at child process, non zero return code. \n"
 
 
 .global main
@@ -52,7 +52,7 @@ run_script:
     mov     $1, %rax                # system call 1 is write
     mov     $1, %rdi                # file handle 1 is stdout
     mov     $child_alive_from_inside, %rsi          # address of string to output
-    mov     $14, %rdx               # number of bytes
+    mov     $24, %rdx               # number of bytes
     syscall  
     
     mov     $60, %rax          # sys_exit
@@ -106,7 +106,7 @@ error_at_child:
     mov     $1, %rax                # system call 1 is write
     mov     $1, %rdi                # file handle 1 is stdout
     mov     $error_at_child_msg, %rsi          # address of string to output
-    mov     $24, %rdx               # number of bytes
+    mov     $48, %rdx               # number of bytes
     syscall  
     
     mov $60, %rax
