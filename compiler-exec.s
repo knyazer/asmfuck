@@ -1,3 +1,5 @@
+# This program takes an assebmly file input, and generates an executable, giving its path in %rax, or $-1 if something failed along the way
+
 .text
 
 child_msg: .asciz "I am a child! \n"
@@ -83,8 +85,6 @@ parent:
     cmp $0, %rax
     jne    error_at_child
     
-
-
     # Say our message
     mov     $1, %rax                # system call 1 is write
     mov     $1, %rdi                # file handle 1 is stdout
