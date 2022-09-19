@@ -1,3 +1,3 @@
 #!/bin/sh
 
-gcc -fno-pie -no-pie -o main main.s
+gcc -fno-pie -no-pie -o main -g main.s

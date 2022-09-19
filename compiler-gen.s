@@ -4,24 +4,30 @@
 .include "jumptable-gen.s"
 
 .text
-    _mov: .asciz "\n    mov "
-    _add: .asciz "\n    add "
-    _sub: .asciz "\n    sub "
+    _mov: .asciz "\n    movb "
+    _addb: .asciz "\n    addb "
+    _addq: .asciz "\n    addq "
+    _subb: .asciz "\n    subb "
+    _subq: .asciz "\n    subq "
     _jmp: .asciz "\n    jmp "
     _jne: .asciz "\n    jne "
     _je: .asciz  "\n    je  "
-    _mul: .asciz "\n    mul "
+    _mul: .asciz "\n    mulb "
     _label: .asciz " label_"
     _colon: .asciz ": \n"
     _new_line: .asciz "\n"
     _loop_start_bp: .asciz "\n    cmpb $0, (%rbx)\n    je"
     
-    _print: .asciz "\n    movq $1, %rax\n    movq $1, %rdi\n    movq $1, %rdx\n    movzxb (%rbx), %rsi\n    syscall\n"
+    _print: .asciz "\n    movq $1, %rax\n    movq $1, %rdi\n    movq $1, %rdx\n    movq %rbx, %rsi\n    syscall\n"
 
     _read: .asciz "\n    movq $0, %rax\n    movq $0, %rdi\n    movq $1, %rdx\n    subq $16, %rsp\n    movq %rsp, %rsi\n    syscall\n    movb (%rsp), %al\n    movb %al, (%r13)\n    addq $16, %rsp\n"
 
     _rbx: .asciz "%rbx"
     _rbx_wrapped: .asciz "(%rbx)"
+    
+    _intro: .asciz ".text\n.global _start\n_start:\n    pushq %rbp\n    movq %rsp, %rbp\n    subq $30000, %rsp\n    movq %rsp, %rbx"
+    
+    _outro: .asciz "\n    movq %rbp, %rsp\n    popq %rbp\n    movq $60, %rax\n    movq $0, %rdi\n    syscall\n"
 
 
 compile_to_string:
@@ -40,6 +46,13 @@ compile_to_string:
     movq %rdi, %r12
     # Pointer to the output - r13
     movq %rsi, %r13
+    
+    # Print the intro
+    movq %r13, %rdi
+    movq $_intro, %rsi
+    call add_line
+    movq %rax, %r13
+
 
     # Main loop
     subq $8, %r12
@@ -63,7 +76,7 @@ gen_main_loop:
 gen_add:
     # addb v%r15b, (%rbx)
     movq %r13, %rdi
-    movq $_add, %rsi
+    movq $_addb, %rsi
     movl %r15d, %edx
     movq $_rbx_wrapped, %rcx
     call construct_line
@@ -74,7 +87,7 @@ gen_add:
 gen_sub:
     # subb v%r15b, (%rbx)
     movq %r13, %rdi
-    movq $_sub, %rsi
+    movq $_subb, %rsi
     movl %r15d, %edx
     movq $_rbx_wrapped, %rcx
     call construct_line
@@ -85,7 +98,7 @@ gen_sub:
 gen_right:
     # addq v%r15, %rbx
     movq %r13, %rdi
-    movq $_add, %rsi
+    movq $_addq, %rsi
     movl %r15d, %edx
     movq $_rbx, %rcx
     call construct_line
@@ -96,7 +109,7 @@ gen_right:
 gen_left:
     # subq v%r15, %rbx
     movq %r13, %rdi
-    movq $_sub, %rsi
+    movq $_subq, %rsi
     movl %r15d, %edx
     movq $_rbx, %rcx
     call construct_line
@@ -115,6 +128,11 @@ gen_print:
     call add_line
 
     movq %rax, %r13
+    
+    decb %r15b
+    cmpb $0, %r15b
+    jne gen_print
+
     jmp gen_main_loop
 
 gen_read:
@@ -156,7 +174,8 @@ gen_loop_start:
 
     # Last label!
     movq %r13, %rdi
-    movq 8(%r12), %rsi
+    movq -8(%r12), %rsi
+    addq $16, %rsi
     call print_label
     movq %rax, %r13
 
@@ -180,7 +199,8 @@ gen_loop_end:
     # Current state: jmp
     
     movq %r13, %rdi
-    movq 8(%r12), %rsi
+    movq -8(%r12), %rsi
+    addq $16, %rsi
     call print_label
     movq %rax, %r13
     # Current state: jmp label_xxx
@@ -333,6 +353,7 @@ construct_line_second_loop_done:
     ret
 
 print_hex_to_address:
+    movq %rdi, %r8 # Save the pointer to the start of the number
     construct_number_loop:
     # Lets take first 4 bits of the %esi, second param, and transform it into a hex digit
     movq %rsi, %rax
@@ -357,8 +378,30 @@ _cl_al_done:
     # And repeat the process until %rsi is 0
     cmpq $0, %rsi
     jne construct_number_loop
+
+    # Now we have to reverse the order of digits
+    # We will do it by swapping the first and the last digits, then the second and the second last, and so on
+    decq %rdi
+    movq %rdi, %r9 # Pointer to the end of the string
+    # r8 is Pointer to the start of the string
+        
+_cl_reverse_loop:
+    cmpq %r9, %r8
+    jge _cl_reverse_done # If the pointers are equal or crossed, we are done
     
-    # Now we have to return the new pointer
+    # Otherwise, we need to swap the digits
+    movb (%r9), %al
+    movb (%r8), %r10b
+    movb %r10b, (%r9)
+    movb %al, (%r8)
+
+    incq %r8
+    decq %r9
+    jmp _cl_reverse_loop
+
+_cl_reverse_done:
+#    # Now we have to return the new pointer
+    incq %rdi
     movq %rdi, %rax
     ret
 
@@ -407,6 +450,12 @@ print_label_with_colon:
     ret    
 
 done:
+    # Print the outro
+    movq %r13, %rdi
+    movq $_outro, %rsi
+    call add_line
+    movq %rax, %r13
+
     # Restore callee-saved registers
     popq %rbx
     popq %r15

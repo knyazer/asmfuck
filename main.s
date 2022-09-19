@@ -10,6 +10,9 @@
 
 .include "jumptable.s"
 .include "compiler-gen.s"
+.include "compiler-exec.s"
+.include "rle.s"
+
 .text
 
 more_than_one_arg_message: .asciz "\n\033[1;31mError: Please, provide exactly one file to be executed. Think about your actions. \033[0m\n"
@@ -159,146 +162,49 @@ read_block:
     # [1 byte] - command
     # [3 bytes] - reserved (padding to 8 bytes)
     
-    # Lets store current compressed program pointer in the %r8, and current raw program pointer in the %r9
-    # %r8 is already set to the correct value, so set only %r9
-    movq %rsp, %r9
+    movq %rsp, %rdi        # Pointer to the beginning of the brainfuck code
+    movq -16(%rbp), %rsi  # Pointer to the beginning of the rle compressed code
+    call rle_encode
     
-add_new_block:
-    # Copy the raw command to the compressed program
-    movb (%r9), %r10b
-    
-    # Allow only correct brainfuck symbold
-    cmpb $'+', %r10b            
-    je not_skip_instruction
-    cmpb $'-', %r10b
-    je not_skip_instruction
-    cmpb $'<', %r10b
-    je not_skip_instruction
-    cmpb $'>', %r10b
-    je not_skip_instruction
-    cmpb $'.', %r10b
-    je not_skip_instruction
-    cmpb $',', %r10b
-    je not_skip_instruction
-    cmpb $'[', %r10b
-    je not_skip_instruction
-    cmpb $']', %r10b
-    je not_skip_instruction
-
-    # If we are here, then we want to skip instruction
-    addq $1, %r9
-    cmpq -16(%rbp), %r9     # Check if we are at the end of the raw program
-    je finish_RLE           # If we are, then finish the compression
-    
-    jmp add_new_block   # otherwise - skip the instruction and continue
-
-not_skip_instruction:
-    movq $0, (%r8)            # Clear the value of the first block
-    movb %r10b, 4(%r8)
-
-move_raw_pointer:
-    incl (%r8)             # Increment the number of repetitions
-    inc %r9                 # Move to the next raw command
-
-restore_state_from_bad_command:
-    cmpq -16(%rbp), %r9     # Check if we are at the end of the raw program
-    je finish_RLE           # If we are, then finish the compression
-    
-    movb (%r9), %r10b       # Save the current command to temporary register
-    
-    # We want to have only singular [ or ] in the blocks of compressed program, as it makes readability better, and execution much less complicated, though overall almost not affecting anything else
-    #jmp RLE_loop_last_step
-
-    cmpb $'[', %r10b        # Check if the current command is [
-    je RLE_open_bracket        # If it was, then move to the next block, ignoring repetitions
-    
-    cmpb $']', %r10b        # Check if the current command is ]
-    je RLE_closed_bracket        # If it was, then move to the next block, ignoring repetitions
-    # If we encounter any symbol which is not command - just skip it
-
-    cmpb $'+', %r10b            
-    je continue_normally
-    cmpb $'-', %r10b
-    je continue_normally
-    cmpb $'<', %r10b
-    je continue_normally
-    cmpb $'>', %r10b
-    je continue_normally
-    cmpb $'.', %r10b
-    je continue_normally
-    cmpb $',', %r10b
-    je continue_normally
-
-    # If we are here, then the command is incorrect, so we want to inrease the counter,
-    inc %r9
-    jmp restore_state_from_bad_command
-
-RLE_open_bracket:
-    # Just allocate one more block in advance, and push the address to the stack
-    # Push twice, because alignment
-    pushq %r8
-    pushq %r8
-
-    addq $8, %r8
-    jmp RLE_loop_last_step
-
-RLE_closed_bracket:
-    # Load corresponding bracket address into %r11
-    popq %r11
-    popq %r11
-
-    # Save the address of current block to the corresponding bracket
-    movq %r8, 8(%r11)
-    # Save the address of corresponding bracket to the next block
-    movq %r11, 8(%r8)
-    # Skip the block
-    addq $8, %r8
-    jmp RLE_loop_last_step
-    
-continue_normally:
-    cmpb 4(%r8), %r10b      # Otherwise, compare the current command with the previous one
-    je move_raw_pointer     # If they are the same, then move to the next one
-
-RLE_loop_last_step:
-    # If they are not, then we need to add new block
-    addq $8, %r8
-    jmp add_new_block
-
-finish_RLE:
-    # Firstly, add new block with $ symbol, which is the end of the program
-    addq $8, %r8
-    movq $1, (%r8) 
-    movb $'$', 4(%r8)
-
-    # then align the last pointer properly 
-
-    addq $8, %r8
-    # Save the current RLE program end pointer to the stack
-    movq %r8, -32(%rbp)
-
-    # Now, we have the RLE compressed program lying in the stack, and we can print it, for debugging purposes
-    
+    movq %rax, -32(%rbp)  # Save the pointer to the end of the rle compressed code
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
-
-    #jmp start_the_execution
     
+looping_around_for_RLE_printing:
+    movq $0, %rax           # Printf flag, no SIMD
+    movq $RLE_placeholder, %rdi # Printf format string
+    movq $0, %rsi           # Zerofy the rsi register
+    movl (%rbx), %esi       # Number of repetitions
+    movq $0, %rdx           # Zerofy the rdx register
+    movb 4(%rbx), %dl      # Command
+    call printf
+    
+    addq $8, %rbx          # Move to the next block
+    cmpq -32(%rbp), %rbx   # Check that we are not at the end of the RLE program
+    jne looping_around_for_RLE_printing
+
+    
+    # Print delimiter
+    movq $0, %rax
+    movq $delimiter, %rdi
+    call printf
     # HERE LETS ATTEMPT TO COMPILE THE PROGRAM TO THE ASSEMBlY USING COMPILER-GEN.
     # rdi - address of first block, rsi - address of the output
     movq -16(%rbp), %rdi
     leaq -2000000(%rbp), %rsi
     call compile_to_string
 
-    # Now lets print it
-    
     # Calculate the length of the string:
     leaq -2000000(%rbp), %rsi
     subq %rsi, %rax
-    movq %rax, %rdx
+    movq %rax, %rsi # Second parameter is the length
+    # First parameter is the address
+    leaq -2000000(%rbp), %rdi
+    call compile_from_string
 
-    movq $1, %rax           # Write flag
-    movq $1, %rdi           # stdout file descriptor
-    leaq -2000000(%rbp), %rsi         # pointer to the string
-    syscall
+    #movq $1, %rax           # Write flag
+    #movq $1, %rdi           # stdout file descriptor
+    #leaq -2000000(%rbp), %rsi         # pointer to the string
+    #syscall
 
 #looping_around_for_RLE_printing:
 #    movq $0, %rax           # Printf flag, no SIMD
