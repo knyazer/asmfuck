@@ -65,6 +65,7 @@ test_text: .asciz "\n test - test \n"
 # s - subtract the marked value from value at data pointer only once
 # A - add the marked value to value at data pointer exactly twice
 # S - subtract the marked value from value at data pointer exactly twice
+# $ - end of the pogram
 
 main:
     # these two lines are for loading the argv and argc without stdlib
@@ -200,9 +201,10 @@ move_raw_pointer:
     inc %r9                 # Move to the next raw command
 
 restore_state_from_bad_command:
-    movb (%r9), %r10b       # Save the current command to temporary register
     cmpq -16(%rbp), %r9     # Check if we are at the end of the raw program
     je finish_RLE           # If we are, then finish the compression
+    
+    movb (%r9), %r10b       # Save the current command to temporary register
     
     # We want to have only singular [ or ] in the blocks of compressed program, as it makes readability better, and execution much less complicated, though overall almost not affecting anything else
     #jmp RLE_loop_last_step
@@ -241,7 +243,13 @@ RLE_loop_last_step:
     jmp add_new_block
 
 finish_RLE:
-    # Firstly, align the last pointer properly 
+    # Firstly, add new block with $ symbol, which is the end of the program
+    addq $8, %r8
+    movq $1, (%r8) 
+    movb $'$', 4(%r8)
+
+    # then align the last pointer properly 
+
     addq $8, %r8
     # Save the current RLE program end pointer to the stack
     movq %r8, -32(%rbp)
@@ -598,9 +606,11 @@ start_the_execution:
     # %r14 - number of repetitions for current optimized loop
     movq -16(%rbp), %r12
     movq -24(%rbp), %r13
-    # zerofi temprorary registers
-    
+    # subtract block size from r12, as we will be adding it in the loop
+    subq $8, %r12
 looping_around_for_execution:
+    addq $8, %r12         # Move to the next block
+
     # Put the command into the r10 register, and pad it with zeros
     movzxb 4(%r12), %r10
     # GDB command to debug: printf "%ld %c, bmem value: %ld, bmem_ptr: %ld \n\n", $rdi, $r10, *(uint64_t*)$r13, $r13 - *(uint64_t*)($rbp-24)
@@ -610,16 +620,16 @@ looping_around_for_execution:
     jmp *%r10
     
     # If we are here, then we failed somehow, but as it was not fatal, then just continue pretending nothing happened
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
     
     # Here are the definitions of complex brainfuck commands
 bf_complex_start:
     movzxb (%r13), %r14 # Save the current data pointer to specific register
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_end:
     # nothing to do here
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_mul:
     movl (%r12), %edi
@@ -627,7 +637,7 @@ bf_complex_mul:
     movq %rdi, %rax     # Move the number of repetitions to rax
     mul %r14          # Multiply it by the counter
     add %rax, (%r13)    # Add it to the current cell
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_sub_mul:
     movl (%r12), %edi
@@ -635,50 +645,52 @@ bf_complex_sub_mul:
     movq %rdi, %rax     # Move the number of repetitions to rax
     mul %r14          # Multiply it by the counter
     sub %rax, (%r13)    # Subtract it from the current cell
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_zero:
     movb $0, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_single_mul:
     addb %r14b, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_double_mul:
     addb %r14b, (%r13)
     addb %r14b, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_sub_single_mul:
     subb %r14b, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_complex_sub_double_mul:
     subb %r14b, (%r13)
     subb %r14b, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
+bf_complex_exit:
+    jmp post_execution
     # Here are the definitions of normal brainfuck commands
 bf_add:
     movl (%r12), %edi
     addb %dil, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
     
 bf_sub:
     movl (%r12), %edi
     subb %dil, (%r13)
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_right:
     movl (%r12), %edi
     addq %rdi, %r13
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_left:
     movl (%r12), %edi
     subq %rdi, %r13
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_print:
     movq $0, %r15
@@ -704,7 +716,7 @@ bf_print_loop:
     cmp $0, %r15
     jne bf_print_loop
 
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
     
 bf_read:
     # While it seems inadequate, our compressed version should be always the same as uncompressed, so we repeat reading char the required number of times. 
@@ -734,24 +746,24 @@ bf_read_loop:
     cmpq $0, %r15           # Check if we are done
     jne bf_read_loop        # If we have not read all the chars, then read the next one
 
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 bf_loop_start:
     cmpb $0, (%r13)         # Check if the current memory cell is zero
     je bf_jump_to_loop_end_start   # If it is, iterate to the end of the loop without executing anything
     subq $16 ,%rsp
     movq %r12, (%rsp)       # Save the current instruction pointer
-    jmp if_else_end_for_execution # and continue execution
+    jmp looping_around_for_execution # and continue execution
 
 bf_loop_end:
     cmpb $0, (%r13)         # Check if the current memory cell is zero
     je pop_the_pointer_to_the_loop_start # If it is, then pop the pointer and continue main loop
     movq (%rsp), %r12               # If it is not, then set current instruction pointer to the saved one
-    jmp if_else_end_for_execution # and continue execution
+    jmp looping_around_for_execution # and continue execution
     
 pop_the_pointer_to_the_loop_start:
     addq $16, %rsp
-    jmp if_else_end_for_execution
+    jmp looping_around_for_execution
 
 # Here is the code for searching the corresponding closing bracket
 bf_jump_to_loop_end_start:
@@ -785,20 +797,13 @@ brackets_counter_inc:
 bf_jump_to_loop_end_sum_check:
     cmpq $0, %r15          # Check if the sum is 0, if so - we have found the end of the loop, ignoring all nested
     jne bf_jump_to_loop_end # If it is not, then continue searching
-    jmp if_else_end_for_execution # If it is, then continue execution (to the next block, so ignore the close loop command)
-    jmp if_else_end_for_execution # If it is, then continue execution (to the next block, so ignore the close loop command)
+    jmp looping_around_for_execution # If it is, then continue execution (to the next block, so ignore the close loop command)
     
 ### IMPORTANT ###
 # Design decision for loops is that we store pointers to the opening brackets in the stack, pushing them to it and popping from it. 
 # This allows to quickly jump back and forth between the brackets, and also allows to have nested loops.
 
-if_else_end_for_execution:
-    addq $8, %r12         # Move to the next block
-    cmpq -32(%rbp), %r12   # Check if we are at the end of the program
-    jne looping_around_for_execution # If not, then continue to the next block
-
-    # If we are at the end of RLE compressed brainfuck code, then we are done
-
+post_execution:
     # Clean up the stack
     movq %rbp, %rsp
     popq %rbp
