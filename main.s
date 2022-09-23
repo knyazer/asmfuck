@@ -191,7 +191,7 @@ looping_around_for_RLE_printing:
     # rdi - address of first block, rsi - address of the output
     movq -16(%rbp), %rdi
     leaq -2000000(%rbp), %rsi
-    call compile_to_string
+    #call compile_to_string
 
     # Calculate the length of the string:
     leaq -2000000(%rbp), %rsi
@@ -199,7 +199,7 @@ looping_around_for_RLE_printing:
     movq %rax, %rsi # Second parameter is the length
     # First parameter is the address
     leaq -2000000(%rbp), %rdi
-    call compile_from_string
+    #call compile_from_string
 
     #movq $1, %rax           # Write flag
     #movq $1, %rdi           # stdout file descriptor
