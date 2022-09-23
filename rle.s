@@ -51,7 +51,7 @@ rle_encode_loop_char_continue:
 
     # Now we will iterate over all the characters in the raw string
 rle_encode_loop:
-    # If the current character is an incrorrect one, increase the %rdi
+    # increase the character ptr %rdi
     incq %rdi
     movb (%rdi), %al
 
@@ -96,28 +96,44 @@ rle_encode_loop_new_block:
 
 
 rle_encode_open_bracket:
+    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
+    
+    # Setup current block
+    movq $0, (%rsi)
+    movb $'[', 4(%rsi)
+    movl $1, (%rsi)
+
     # Save the current address of the block
     pushq %rsi
 
-    # Allocate one quad after the current block
+    # Allocate one additional quad after the current block
     addq $8, %rsi
-
+    movq $0, (%rsi) # Clean it up
+    
     # Create a new block
-    jmp rle_encode_loop_new_block
+    jmp rle_encode_loop
 
 rle_encode_closed_bracket:
+    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
+    
+    # Setup current block
+    movq $0, (%rsi)
+    movb $']', 4(%rsi)
+    movl $1, (%rsi)
+
     # Restore the address of the block
     popq %rdx
     
     # Put the current block address into the previously allocated block after open bracket
     movq %rsi, 8(%rdx)
-
+    
+    
     # Put the open bracket block address after current block
     addq $8, %rsi
+    movq $0, (%rsi) # Clean it up
     movq %rdx, (%rsi)
 
-    # Create new block
-    jmp rle_encode_loop_new_block
+    jmp rle_encode_loop
 
 
 rle_encode_loop_end:

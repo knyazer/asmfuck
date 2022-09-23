@@ -174,8 +174,7 @@ gen_loop_start:
 
     # Last label!
     movq %r13, %rdi
-    movq -8(%r12), %rsi
-    addq $16, %rsi
+    movq 8(%r12), %rsi
     call print_label
     movq %rax, %r13
 
@@ -199,8 +198,7 @@ gen_loop_end:
     # Current state: jmp
     
     movq %r13, %rdi
-    movq -8(%r12), %rsi
-    addq $16, %rsi
+    movq 8(%r12), %rsi
     call print_label
     movq %rax, %r13
     # Current state: jmp label_xxx
