@@ -66,7 +66,6 @@ jumptable:
     .quad bf_right
     .quad looping_around_for_execution
     .quad looping_around_for_execution
-    .quad bf_complex_double_mul
     .quad looping_around_for_execution
     .quad looping_around_for_execution
     .quad looping_around_for_execution
@@ -84,7 +83,8 @@ jumptable:
     .quad looping_around_for_execution
     .quad looping_around_for_execution
     .quad looping_around_for_execution
-    .quad bf_complex_sub_double_mul
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
     .quad looping_around_for_execution
     .quad looping_around_for_execution
     .quad looping_around_for_execution

@@ -67,8 +67,6 @@ test_text: .asciz "\n test - test \n"
 # / - subtract the marked value (multiplied by the number of repetitions) from value at data pointer
 # a - add the marked value to value at data pointer only once
 # s - subtract the marked value from value at data pointer only once
-# A - add the marked value to value at data pointer exactly twice
-# S - subtract the marked value from value at data pointer exactly twice
 # $ - end of the pogram
 
 main:
@@ -79,7 +77,7 @@ main:
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
     
-    subq $0x100000, %rsp    # Allocate 1 MB of memory on stack
+    subq $0x100000, %rsp    # Allocate 2 MB of memory on stack
     # The structure of stack is decently simple:
     # --------------------------------------------------   <- %rbp
     # some local vars & thingies
@@ -252,9 +250,10 @@ read_block:
 # IMPORTANT: Condition: the only operation made on the parent loop counter is single decrement.
 
 # This stage of optimization of the not nested loops is called leaf optimization, as these loops in the tree of loops are the leaves.
-    
-    # call loop_optimization
 
+    # First parameter is the address of RLE compressed program, second parameter is the address of output
+    movq -16(%rbp), %rdi
+    call leaf_optimization
 
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
 looping_around_for_RLE_printing:
@@ -275,30 +274,8 @@ looping_around_for_RLE_printing:
     movq $delimiter, %rdi
     call printf
 start_the_execution:
-    # Now we can print the processed RLE once more
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
     
-#looping_around_for_RLE_printing_2:
-#    cmpb $0, (%rbx)     # Check if the block is empty
-#    je after_printf_RLE_2
-#    movq $0, %rax           # Printf flag, no SIMD
-#    movq $RLE_placeholder, %rdi # Printf format string
-#    movq $0, %rsi           # Zerofy the rsi register
-#    movl (%rbx), %esi       # Number of repetitions
-#    movq $0, %rdx           # Zerofy the rdx register
-#    movb 4(%rbx), %dl      # Command
-#    call printf
-#after_printf_RLE_2:
-#    addq $8, %rbx          # Move to the next block
-#    cmpq -32(%rbp), %rbx   # Check that we are not at the end of the RLE program
-#    jne looping_around_for_RLE_printing_2
-#    
-#    # Print delimiter
-#    movq $0, %rax
-#    movq $delimiter, %rdi
-#    call printf
-
-
     # Now, we can execute the program
     # Lets define some registers:
     # %r12 - pointer to the current instruction block
@@ -324,8 +301,13 @@ looping_around_for_execution:
     
     # Here are the definitions of complex brainfuck commands
 bf_complex_start:
+    addq $8, %r12 # Increment the instruction pointer anyways, so now it points to the loop end address
     movzxb (%r13), %r14 # Save the current data pointer to specific register
-    jmp looping_around_for_execution
+    cmpb $0, %r14b        # Check if the current memory cell is zero
+    jne looping_around_for_execution # If not - continue execution
+    movq (%r12), %r12
+    addq $8, %r12 # Move the pointer to the instruction after the loop end
+    jmp looping_around_for_execution # and continue execution
 
 bf_complex_end:
     # nothing to do here
@@ -355,17 +337,7 @@ bf_complex_single_mul:
     addb %r14b, (%r13)
     jmp looping_around_for_execution
 
-bf_complex_double_mul:
-    addb %r14b, (%r13)
-    addb %r14b, (%r13)
-    jmp looping_around_for_execution
-
 bf_complex_sub_single_mul:
-    subb %r14b, (%r13)
-    jmp looping_around_for_execution
-
-bf_complex_sub_double_mul:
-    subb %r14b, (%r13)
     subb %r14b, (%r13)
     jmp looping_around_for_execution
 
