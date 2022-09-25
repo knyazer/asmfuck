@@ -66,7 +66,6 @@ jumptable_gen:
     .quad gen_right
     .quad gen_main_loop
     .quad gen_main_loop
-    .quad gen_complex_double_mul
     .quad gen_main_loop
     .quad gen_main_loop
     .quad gen_main_loop
@@ -84,7 +83,8 @@ jumptable_gen:
     .quad gen_main_loop
     .quad gen_main_loop
     .quad gen_main_loop
-    .quad gen_complex_sub_double_mul
+    .quad gen_main_loop
+    .quad gen_main_loop
     .quad gen_main_loop
     .quad gen_main_loop
     .quad gen_main_loop

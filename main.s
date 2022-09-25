@@ -38,6 +38,8 @@ delimiter: .asciz "\n\n---------------------------\n\n"
 
 test_text: .asciz "\n test - test \n"
 
+
+
 .global main
 
 # The perfomace profiler I prefer is callgrind + kcachegrind
@@ -77,7 +79,7 @@ main:
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
     
-    subq $0x100000, %rsp    # Allocate 2 MB of memory on stack
+    subq $0x80000, %rsp    # Allocate 2 MB of memory on stack
     # The structure of stack is decently simple:
     # --------------------------------------------------   <- %rbp
     # some local vars & thingies
@@ -95,6 +97,10 @@ main:
     # Raw brainfuck code (string)
     # --------------------------------------------------   <-  %rsp
     # end
+    # 
+    # --------------------------------------------------   <-  -48(%rbp)
+    # compiled brainfuck code
+    # --------------------------------------------------   <-  -40(%rbp)
     # 
     #
     # Some useful addresses:
@@ -164,23 +170,8 @@ read_block:
     movq %rsp, %rdi        # Pointer to the beginning of the brainfuck code
     movq -16(%rbp), %rsi  # Pointer to the beginning of the rle compressed code
     call rle_encode
-    
     movq %rax, -32(%rbp)  # Save the pointer to the end of the rle compressed code
-
-
-    # HERE LETS ATTEMPT TO COMPILE THE PROGRAM TO THE ASSEMBlY USING COMPILER-GEN.
-    # rdi - address of first block, rsi - address of the output
-    movq -16(%rbp), %rdi
-    leaq -2000000(%rbp), %rsi
-    call compile_to_string
-
-    # Calculate the length of the string:
-    leaq -2000000(%rbp), %rsi
-    subq %rsi, %rax
-    movq %rax, %rsi # Second parameter is the length
-    # First parameter is the address
-    leaq -2000000(%rbp), %rdi
-    call compile_from_string
+    
 
     #movq $1, %rax           # Write flag
     #movq $1, %rdi           # stdout file descriptor
@@ -255,6 +246,9 @@ read_block:
     movq -16(%rbp), %rdi
     call leaf_optimization
 
+    # skip the output, because we don't need it for release
+    # remove the next line if you want to look to the code
+    jmp RLE_show_debug_end
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
 looping_around_for_RLE_printing:
     movq $0, %rax           # Printf flag, no SIMD
@@ -264,7 +258,20 @@ looping_around_for_RLE_printing:
     movq $0, %rdx           # Zerofy the rdx register
     movb 4(%rbx), %dl      # Command
     call printf
-    
+
+    cmpb $'[', 4(%rbx)
+    je skip_next_block
+    cmpb $']', 4(%rbx)
+    je skip_next_block
+    cmpb $'(', 4(%rbx)
+    je skip_next_block
+    cmpb $')', 4(%rbx)
+    je skip_next_block
+
+    jmp not_skip_next_block
+skip_next_block:
+    addq $8, %rbx
+not_skip_next_block:
     addq $8, %rbx          # Move to the next block
     cmpq -32(%rbp), %rbx   # Check that we are not at the end of the RLE program
     jne looping_around_for_RLE_printing
@@ -273,6 +280,34 @@ looping_around_for_RLE_printing:
     movq $0, %rax
     movq $delimiter, %rdi
     call printf
+RLE_show_debug_end:
+    # Now lets compile the thingy
+    # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
+    movq $0x200000, %rdi    # Size of the memory to allocate
+    call malloc
+    movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
+
+    # rdi - address of first block, rsi - address of the output
+    movq -16(%rbp), %rdi
+    movq -40(%rbp), %rsi
+    call compile_to_string
+    movq %rax, -48(%rbp)  # Save the pointer to the end of the compiled code
+
+    # Calculate the length of the string:
+    movq -48(%rbp), %rsi
+    movq -40(%rbp), %rax
+    subq %rax, %rsi
+    # First parameter is the address
+    movq -40(%rbp), %rdi
+    call compile_from_string
+
+    # Check if the rax is 0, if so - exit
+    cmpq $0, %rax
+    je end
+
+    # Otherwise, something failed along the way, so execute the interpreter
+
+# And finally, start the interpretation
 start_the_execution:
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
     

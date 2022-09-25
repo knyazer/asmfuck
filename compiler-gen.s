@@ -4,30 +4,49 @@
 .include "jumptable-gen.s"
 
 .text
-    _mov: .asciz "\n    movb "
-    _addb: .asciz "\n    addb "
-    _addq: .asciz "\n    addq "
-    _subb: .asciz "\n    subb "
-    _subq: .asciz "\n    subq "
-    _jmp: .asciz "\n    jmp "
-    _jne: .asciz "\n    jne "
-    _je: .asciz  "\n    je  "
-    _mul: .asciz "\n    mulb "
+    _mov: .asciz "\nmovb "
+    _addb: .asciz "\naddb "
+    _addq: .asciz "\naddq "
+    _subb: .asciz "\nsubb "
+    _subq: .asciz "\nsubq "
+    _jmp: .asciz "\njmp "
+    _jne: .asciz "\njne "
+    _je: .asciz  "\nje "
+    _mul: .asciz "\nmulb "
     _label: .asciz " label_"
-    _colon: .asciz ": \n"
+    _colon: .asciz ":\n"
     _new_line: .asciz "\n"
-    _loop_start_bp: .asciz "\n    cmpb $0, (%rbx)\n    je"
+    _loop_start_bp: .asciz "\ncmpb $0,(%rbx)\nje"
     
-    _print: .asciz "\n    movq $1, %rax\n    movq $1, %rdi\n    movq $1, %rdx\n    movq %rbx, %rsi\n    syscall\n"
+    _print: .asciz "\nmovq $1,%rax\nmovq $1,%rdi\nmovq $1,%rdx\nmovq %rbx,%rsi\nsyscall\n"
 
-    _read: .asciz "\n    movq $0, %rax\n    movq $0, %rdi\n    movq $1, %rdx\n    subq $16, %rsp\n    movq %rsp, %rsi\n    syscall\n    movb (%rsp), %al\n    movb %al, (%r13)\n    addq $16, %rsp\n"
+    _read: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $2,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,(%rbx)\naddq $16,%rsp\n"
 
     _rbx: .asciz "%rbx"
     _rbx_wrapped: .asciz "(%rbx)"
     
-    _intro: .asciz ".text\n.global _start\n_start:\n    pushq %rbp\n    movq %rsp, %rbp\n    subq $30000, %rsp\n    movq %rsp, %rbx"
+    _intro: .asciz ".text\n.global _start\n_start:\npushq %rbp\nmovq %rsp,%rbp\nsubq $30000,%rsp\nmovq %rsp,%rbx"
     
-    _outro: .asciz "\n    movq %rbp, %rsp\n    popq %rbp\n    movq $60, %rax\n    movq $0, %rdi\n    syscall\n"
+    _outro: .asciz "\nmovq %rbp,%rsp\npopq %rbp\nmovq $60, %rax\nmovq $0,%rdi\nsyscall\n"
+
+    _complex_mul: .asciz "movb (%rbx),\n"
+    
+    _complex_start: .asciz "movb (%rbx),%r15b\n"
+
+    _complex_zero: .asciz "movb $0, (%rbx)\n"
+
+    _complex_mul_1: .asciz "movb $0x"
+
+    _complex_mul_2: .asciz ", %al\nmulb %r15b\naddb %al, (%rbx)\n"
+
+    _complex_sub_mul_1: .asciz "movb $0x"
+
+    _complex_sub_mul_2: .asciz ", %al\nmulb %r15b\nsubb %al, (%rbx)\n"
+
+    _complex_single_mul: .asciz "addb %r15b, (%rbx)\n"
+
+    _complex_sub_single_mul: .asciz "subb %r15b, (%rbx)\n"
+
 
 
 compile_to_string:
@@ -143,8 +162,8 @@ gen_read:
     # movq %rsp, %rsi
     # syscall
     # movb (%rsp), %al
-    # movb %al, (%r13)
-    # addq $16, %rsp
+    #movb %al, (%r13)
+    #addq $16, %rsp
     movq %r13, %rdi
     movq $_read, %rsi
     call add_line
@@ -185,6 +204,7 @@ gen_loop_start:
     movq %rax, %r13
     
     # Done
+    addq $8, %r12 # skip next block with address
 
     jmp gen_main_loop
 
@@ -216,7 +236,8 @@ gen_loop_end:
     movq %rax, %r13
 
     # Done
-    
+    addq $8, %r12 # skip next block with address
+
     jmp gen_main_loop
 
 # Complex operations are here
@@ -229,32 +250,100 @@ gen_complex_exit:
     jmp done
 
 gen_complex_start:
-    
+    # We want to put the current block value into %r15
+    # movzxb (%rbx), %r15b
+    movq %r13, %rdi
+    movq $_complex_start, %rsi
+    call add_line
+    movq %rax, %r13
+
+    addq $8, %r12 # skip next block with address
     jmp gen_main_loop
 
 gen_complex_end:
+    # Do nothing
+
+    addq $8, %r12 # skip next block with address
     jmp gen_main_loop
 
 gen_complex_mul:
+    # Here we want to add to the current block r15 * repetitions
+    # movb repetitons, %al
+    # mulb %r15b
+    # addb %al, (%rbx)
+    movq %r13, %rdi
+    movq $_complex_mul_1, %rsi
+    call add_line
+    movq %rax, %r13
+
+    movq %r13, %rdi
+    movzxb %r15b, %rsi
+    call print_hex_to_address
+    movq %rax, %r13
+
+    movq %r13, %rdi
+    movq $_complex_mul_2, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
 gen_complex_sub_mul:
+    # Here we want to subtract from the current block r15 * repetitions
+    # movb repetitons, %al
+    # mulb %r15b
+    # subb %al, (%rbx)
+    movq %r13, %rdi
+    movq $_complex_sub_mul_1, %rsi
+    call add_line
+    movq %rax, %r13
+
+    movq %r13, %rdi
+    movzxb %r15b, %rsi
+    call print_hex_to_address
+    movq %rax, %r13
+
+    movq %r13, %rdi
+    movq $_complex_sub_mul_2, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
 gen_complex_single_mul:
-    jmp gen_main_loop
+    # Here we want to add to the current block r15, without repetitions
+    # addb %r15b, (%rbx)
+    movq %r13, %rdi
+    movq $_complex_single_mul, %rsi
+    call add_line
 
-gen_complex_double_mul:
+    movq %rax, %r13
     jmp gen_main_loop
 
 gen_complex_sub_single_mul:
-    jmp gen_main_loop
+    # Here we want to subtract r15 from the current block, without repetitions
+    # subb %r15b, (%rbx)
+    movq %r13, %rdi
+    movq $_complex_sub_single_mul, %rsi
+    call add_line
 
-gen_complex_sub_double_mul:
+    movq %rax, %r13
     jmp gen_main_loop
 
 gen_complex_zero:
+    # Here we want to set the current block to zero
+    # movb $0, (%rbx)
+    movq %r13, %rdi
+    movq $_complex_zero, %rsi
+    call add_line
+
+    movq %rax, %r13
     jmp gen_main_loop
+
+
+# End of instructions list
+# Start of functions
+
 
 add_line:
     pushq %rbp
