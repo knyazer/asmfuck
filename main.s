@@ -171,6 +171,28 @@ read_block:
     movq %rax, -32(%rbp)  # Save the pointer to the end of the rle compressed code
     
 
+    # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
+    movq $0x200000, %rdi    # Size of the memory to allocate
+    call malloc
+    movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
+    # rdi - address of first block, rsi - address of the output
+    movq -16(%rbp), %rdi
+    movq -40(%rbp), %rsi
+    call compile_to_string
+    movq %rax, -48(%rbp)  # Save the pointer to the end of the compiled code
+
+    # Calculate the length of the string:
+    movq -48(%rbp), %rsi
+    movq -40(%rbp), %rax
+    subq %rax, %rsi
+    # First parameter is the address
+    movq -40(%rbp), %rdi
+    call compile_from_string
+
+    # Check if the rax is 0, if so - exit
+    cmpq $0, %rax
+    je end
+
     #movq $1, %rax           # Write flag
     #movq $1, %rdi           # stdout file descriptor
     #leaq -2000000(%rbp), %rsi         # pointer to the string
@@ -280,29 +302,8 @@ not_skip_next_block:
     call printf
 RLE_show_debug_end:
     # Now lets compile the thingy
-    # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
-    movq $0x200000, %rdi    # Size of the memory to allocate
-    call malloc
-    movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
 
-    # rdi - address of first block, rsi - address of the output
-    movq -16(%rbp), %rdi
-    movq -40(%rbp), %rsi
-    call compile_to_string
-    movq %rax, -48(%rbp)  # Save the pointer to the end of the compiled code
-
-    # Calculate the length of the string:
-    movq -48(%rbp), %rsi
-    movq -40(%rbp), %rax
-    subq %rax, %rsi
-    # First parameter is the address
-    movq -40(%rbp), %rdi
-    call compile_from_string
-
-    # Check if the rax is 0, if so - exit
-    cmpq $0, %rax
-    je end
-
+# TODO: move back the thingy, compilation, here
     # Otherwise, something failed along the way, so execute the interpreter
 
 # And finally, start the interpretation

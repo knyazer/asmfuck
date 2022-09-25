@@ -18,11 +18,14 @@
     _new_line: .asciz "\n"
     _loop_start_bp: .asciz "\ncmpb $0,(%rbx)\nje"
     
-    _print: .asciz "\nmovq $1,%rax\nmovq $1,%rdi\nmovq $1,%rdx\nmovq %rbx,%rsi\nsyscall\n"
+    _print_1: .asciz "\nmovq $1,%rax\nmovq $1,%rdi\nmovq $1,%rdx\nmovq %rbx,%rsi\naddq $"
+    _print_2: .asciz ", %rsi\nsyscall\n"
 
-    _read: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $2,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,(%rbx)\naddq $16,%rsp\n"
+    _read_1: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $2,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,"
+    _read_2: .asciz "(%rbx)\naddq $16,%rsp\n"
 
     _rbx: .asciz "%rbx"
+
     _rbx_wrapped: .asciz "(%rbx)"
     
     _intro: .asciz ".text\n.global _start\n_start:\npushq %rbp\nmovq %rsp,%rbp\nsubq $30000,%rsp\nmovq %rsp,%rbx"
@@ -72,7 +75,8 @@ compile_to_string:
     call add_line
     movq %rax, %r13
 
-
+    
+    movq $0, %r14 # the relative-pointer counter set to 0
     # Main loop
     subq $8, %r12
 gen_main_loop:
@@ -98,6 +102,7 @@ gen_add:
     movq $_addb, %rsi
     movl %r15d, %edx
     movq $_rbx_wrapped, %rcx
+    movq %r14, %r8 # offset
     call construct_line
 
     movq %rax, %r13
@@ -109,6 +114,7 @@ gen_sub:
     movq $_subb, %rsi
     movl %r15d, %edx
     movq $_rbx_wrapped, %rcx
+    movq %r14, %r8 # offset
     call construct_line
     
     movq %rax, %r13
@@ -116,24 +122,29 @@ gen_sub:
 
 gen_right:
     # addq v%r15, %rbx
-    movq %r13, %rdi
-    movq $_addq, %rsi
-    movl %r15d, %edx
-    movq $_rbx, %rcx
-    call construct_line
+    #movq %r13, %rdi
+    #movq $_addq, %rsi
+    #movl %r15d, %edx
+    #movq $_rbx, %rcx
+    #call construct_line
 
-    movq %rax, %r13
+    #movq %rax, %r13
+    # when we move right, we actually only add the value to r14, which sets the offset for every other operation
+    addq %r15, %r14
+
     jmp gen_main_loop
 
 gen_left:
     # subq v%r15, %rbx
-    movq %r13, %rdi
-    movq $_subq, %rsi
-    movl %r15d, %edx
-    movq $_rbx, %rcx
-    call construct_line
+    #movq %r13, %rdi
+    #movq $_subq, %rsi
+    #movl %r15d, %edx
+    #movq $_rbx, %rcx
+    #call construct_line
 
-    movq %rax, %r13
+    #movq %rax, %r13
+    # when we move left, we actually only sub the value from r14, which sets the offset
+    subq %r15, %r14
     jmp gen_main_loop
 
 gen_print:
@@ -143,9 +154,19 @@ gen_print:
     # movzxb (%rbx), %rsi
     # syscall
     movq %r13, %rdi
-    movq $_print, %rsi
+    movq $_print_1, %rsi
     call add_line
+    movq %rax, %r13
+    
+    # print the offset
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset_wz
+    movq %rax, %r13
 
+    movq %r13, %rdi
+    movq $_print_2, %rsi
+    call add_line
     movq %rax, %r13
     
     decb %r15b
@@ -153,7 +174,7 @@ gen_print:
     jne gen_print
 
     jmp gen_main_loop
-
+# TODO: multiple reads
 gen_read:
     # movq $0, %rax
     # movq $0, %rdi
@@ -165,12 +186,24 @@ gen_read:
     #movb %al, (%r13)
     #addq $16, %rsp
     movq %r13, %rdi
-    movq $_read, %rsi
+    movq $_read_1, %rsi
     call add_line
-
     movq %rax, %r13
+    
+    # print the offset
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset_wz
+    movq %rax, %r13
+    
+    movq %r13, %rdi
+    movq $_read_2, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
+# At any loop start/end we set the relative counter to 0, and then add/sub to the real counters
 gen_loop_start:
     # label_xxx:
     #     cmpb $0, (%rbx)
@@ -180,6 +213,20 @@ gen_loop_start:
     # Lets use it in hex form, as a xxx and yyy. We will use the same format for all labels
     # So, yyy = 8(%r12), qword; xxx = %r12, qword
     
+    # resolve the situation with relative pointers
+    cmpq $0, %r14
+    je gen_loop_start_no_offset
+    movq %r13, %rdi
+    movq $_addq, %rsi
+    movq %r14, %rdx
+    movq $_rbx, %rcx
+    movq $0, %r8
+    call construct_line
+    movq %rax, %r13
+    # and zerofy current relative pointer
+    movq $0, %r14
+gen_loop_start_no_offset:
+
     movq %r13, %rdi
     movq %r12, %rsi
     call print_label_with_colon
@@ -202,7 +249,7 @@ gen_loop_start:
     movq $_new_line, %rsi
     call add_line
     movq %rax, %r13
-    
+
     # Done
     addq $8, %r12 # skip next block with address
 
@@ -211,6 +258,20 @@ gen_loop_start:
 gen_loop_end:
     #     jmp label_xxx
     # label_yyy:
+
+    # now we have to resolve the situation with relative pointers
+    cmpq $0, %r14
+    je gen_loop_end_no_offset
+    movq %r13, %rdi
+    movq $_addq, %rsi
+    movq %r14, %rdx
+    movq $_rbx, %rcx
+    movq $0, %r8
+    call construct_line
+    movq %rax, %r13
+    # and zerofy current relative pointer
+    movq $0, %r14
+gen_loop_end_no_offset:
     movq %r13, %rdi
     movq $_jmp, %rsi
     call add_line
@@ -234,6 +295,7 @@ gen_loop_end:
     movq %r12, %rsi
     call print_label_with_colon
     movq %rax, %r13
+    
 
     # Done
     addq $8, %r12 # skip next block with address
@@ -249,6 +311,7 @@ gen_complex_exit:
 
     jmp done
 
+# in complex loops no stuff with relative pointers is needed, as there are by definiton no arbitrary pointer movement
 gen_complex_start:
     # We want to put the current block value into %r15
     # movzxb (%rbx), %r15b
@@ -344,6 +407,40 @@ gen_complex_zero:
 # End of instructions list
 # Start of functions
 
+print_offset_wz:
+    # offset (relative pointer) lies in the %rsi, pointer to the current block lies in %rdi
+    movq %rdi, %rax # return this thing if offset is 0
+    cmpq $0, %rsi
+    jge continue_printing_offset_wz
+    movq $'-', (%rdi)
+    incq %rdi
+    neg %rsi
+continue_printing_offset_wz:
+    movb $'0', (%rdi)
+    movb $'x', 1(%rdi)
+    addq $2, %rdi
+
+    call print_hex_to_address
+    ret
+
+print_offset:
+    # offset (relative pointer) lies in the %rsi, pointer to the current block lies in %rdi
+    movq %rdi, %rax # return this thing if offset is 0
+    cmpq $0, %rsi
+    je finish_printing_offset
+    jg continue_printing_offset
+    movq $'-', (%rdi)
+    incq %rdi
+    neg %rsi
+continue_printing_offset:
+    movb $'0', (%rdi)
+    movb $'x', 1(%rdi)
+    addq $2, %rdi
+
+    call print_hex_to_address
+finish_printing_offset:
+    ret
+
 
 add_line:
     pushq %rbp
@@ -376,6 +473,7 @@ add_line_done:
 construct_line:
     pushq %rbp
     movq %rsp, %rbp
+    pushq %r8 # push 5th parameter
 
     # Pointer to the dest - rdi, first param
     # Pointer to the source - rsi, second param
@@ -396,21 +494,23 @@ construct_line_first_loop:
 construct_line_first_loop_done:
     # Now, we have reached interesting stuff. The first thing is to render the number of repetitions, which is in %edx. How do we do that? Simple: print 8 digits in hex.
     
-    # Firstly, print hex prefix $0x
     movb $'$', (%rdi)
-    movb $'0', 1(%rdi)
-    movb $'x', 2(%rdi)
-    addq $3, %rdi
+    incq %rdi
 
     # rdi is correct, rsi is not
-    movl %edx, %esi # Move the number to the second param
-    call print_hex_to_address
+    movq %rdx, %rsi # Move the number to the second param
+    call print_offset
+    movq %rax, %rdi
 
     # Now we need to add ' , ' to the dest
-    movb $' ', (%rdi)
-    movb $',', 1(%rdi)
-    movb $' ', 2(%rdi)
-    addq $3, %rdi
+    movb $',', (%rdi)
+    movb $' ', 1(%rdi)
+    addq $2, %rdi
+
+    # now check whether the 4th parameter rdx is 0 or not. if it is 0 - skip the offset, if it is not - print it
+    popq %r8 # pop 5th parameter
+    movq %r8, %rsi
+    call print_offset
 
     # Now we need to add the last param, which is in %rcx, to the dest
 construct_line_second_loop:
