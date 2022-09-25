@@ -38,8 +38,6 @@ delimiter: .asciz "\n\n---------------------------\n\n"
 
 test_text: .asciz "\n test - test \n"
 
-
-
 .global main
 
 # The perfomace profiler I prefer is callgrind + kcachegrind

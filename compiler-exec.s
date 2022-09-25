@@ -7,6 +7,8 @@ compilation_enter_message: .asciz "Compilation started\n"
 compilation_error_message: .asciz "Compilation failed\n"
 compilation_success_message: .asciz "Compilation successful\n"
 
+executable_enter_message: .asciz "Starting the executable...\n"
+
 error_at_fork_msg: .asciz "Error at fork\n"
 
 filename: .asciz "/tmp/compiled_brainfuck_138047.s"
@@ -14,12 +16,12 @@ filename: .asciz "/tmp/compiled_brainfuck_138047.s"
 # to compile the thing we use the following script:
 # sh -c '$(which as) -o /tmp/compiled_brainfuck_138047.o /tmp/compiled_brainfuck_138047.s && $(which ld) -o /tmp/compiled_brainfuck_138047 /tmp/compiled_brainfuck_138047.o'
 
-sh_path_2: .asciz "/bin/sh"
-
-sh_path: .asciz "/usr/bin/sh"
+sh_path: .asciz "/bin/sh"
 
 sh_arg_1: .asciz "-c"
 sh_arg_2: .asciz "as -o /tmp/compiled_brainfuck_138047.o /tmp/compiled_brainfuck_138047.s 2> /dev/null && ld -o /tmp/compiled_brainfuck_138047 /tmp/compiled_brainfuck_138047.o 2> /dev/null"
+
+sh_arg_2_rm: .asciz "rm -rf /tmp/compiled_brainfuck* 2> /dev/null"
 
 executable_path: .asciz "/tmp/compiled_brainfuck_138047"
 
@@ -59,7 +61,7 @@ run_shell:
     #mov     $1, %rax                # system call 1 is write
     #mov     $1, %rdi                # file handle 1 is stdout
     #mov     $compilation_enter_message, %rsi          # address of string to output
-    #mov     $13, %rdx               # number of bytes
+    #mov     $20, %rdx               # number of bytes
     #syscall  
     
     # A long preparation for the execve
@@ -147,7 +149,47 @@ parent_final:
     syscall
 
     # now we do not really care what happened, as it should be fine anyways
-    # so we just exit with code 0
+    # fork
+    mov $57, %rax
+    syscall # sys_fork
+    and     %rax, %rax        # rax contains the PID
+    # If zero - child, otherwise - parent
+
+    js error_at_fork
+    jnz parent_final_final
+
+run_rm:
+    # A long preparation for the execve
+    xor %rdx, %rdx 
+    pushq %rdx
+    leaq sh_arg_2_rm, %r9
+    pushq %r9
+    leaq sh_arg_1, %r9
+    pushq %r9
+    leaq sh_path, %rdi
+    pushq %rdi
+    movq %rsp, %rsi
+
+    mov $59, %rax # Execve 
+    syscall
+
+    # Exit with code 1, as we need to tell the parent that something failed
+    mov $60, %rax
+    mov $1, %rdi
+    syscall
+
+parent_final_final:
+    movq %rax, %r12 # Save the childs pid
+
+    # Wait until child finishes
+    pushq $0
+    mov     $61, %rax
+    mov     %r12, %rdi
+    mov     %rsp, %rsi
+    mov     $0, %rdx
+    syscall
+
+    # now we do not really care what happened, as it should be fine anyways
     jmp success
 
 compiler_exec_end:
