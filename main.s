@@ -123,7 +123,7 @@ zerofy_memory:
     addq $8, %rax
     cmpq %rax, %r10 # Iterate until %rax == brainfuck memory end
     jne zerofy_memory
-
+# TODO: .skip
 
     # Check that there is exactly one argument (argc = 2, first one is something like path or number, whatever)
     cmpq $2, %rdi
@@ -281,7 +281,7 @@ not_skip_next_block:
 RLE_show_debug_end:
     # Now lets compile the thingy
     # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
-    movq $0x200000, %rdi    # Size of the memory to allocate
+    movq $0x800000, %rdi    # Size of the memory to allocate
     call malloc
     movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
 
