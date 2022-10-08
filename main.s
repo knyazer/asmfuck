@@ -164,13 +164,41 @@ read_block:
     # [4 bytes] - number of repetitions
     # [1 byte] - command
     # [3 bytes] - reserved (padding to 8 bytes)
-    
     movq %rsp, %rdi        # Pointer to the beginning of the brainfuck code
     movq -16(%rbp), %rsi  # Pointer to the beginning of the rle compressed code
     call rle_encode
     movq %rax, -32(%rbp)  # Save the pointer to the end of the rle compressed code
     
+#jmp NO_LO 
+    # First parameter is the address of RLE compressed program, second parameter is the address of output
+    movq -16(%rbp), %rdi
+    call leaf_optimization
+NO_LO:
+#jmp NO_COMPILATION
+    # Now lets compile the thingy
+    # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
+    movq $0x800000, %rdi    # Size of the memory to allocate
+    call malloc
+    movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
 
+    # rdi - address of first block, rsi - address of the output
+    movq -16(%rbp), %rdi
+    movq -40(%rbp), %rsi
+    call compile_to_string
+    movq %rax, -48(%rbp)  # Save the pointer to the end of the compiled code
+
+    # Calculate the length of the string:
+    movq -48(%rbp), %rsi
+    movq -40(%rbp), %rax
+    subq %rax, %rsi
+    # First parameter is the address
+    movq -40(%rbp), %rdi
+    call compile_from_string
+
+    # Check if the rax is 0, if so - exit
+    cmpq $0, %rax
+    je end
+NO_COMPILATION:
     #movq $1, %rax           # Write flag
     #movq $1, %rdi           # stdout file descriptor
     #leaq -2000000(%rbp), %rsi         # pointer to the string
@@ -240,13 +268,9 @@ read_block:
 
 # This stage of optimization of the not nested loops is called leaf optimization, as these loops in the tree of loops are the leaves.
 
-    # First parameter is the address of RLE compressed program, second parameter is the address of output
-    movq -16(%rbp), %rdi
-    call leaf_optimization
-
     # skip the output, because we don't need it for release
     # remove the next line if you want to look to the code
-    jmp RLE_show_debug_end
+#    jmp RLE_show_debug_end
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
 looping_around_for_RLE_printing:
     movq $0, %rax           # Printf flag, no SIMD
@@ -279,30 +303,6 @@ not_skip_next_block:
     movq $delimiter, %rdi
     call printf
 RLE_show_debug_end:
-    # Now lets compile the thingy
-    # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
-    movq $0x800000, %rdi    # Size of the memory to allocate
-    call malloc
-    movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
-
-    # rdi - address of first block, rsi - address of the output
-    movq -16(%rbp), %rdi
-    movq -40(%rbp), %rsi
-    call compile_to_string
-    movq %rax, -48(%rbp)  # Save the pointer to the end of the compiled code
-
-    # Calculate the length of the string:
-    movq -48(%rbp), %rsi
-    movq -40(%rbp), %rax
-    subq %rax, %rsi
-    # First parameter is the address
-    movq -40(%rbp), %rdi
-    call compile_from_string
-
-    # Check if the rax is 0, if so - exit
-    cmpq $0, %rax
-    je end
-
     # Otherwise, something failed along the way, so execute the interpreter
 
 # And finally, start the interpretation
@@ -432,20 +432,22 @@ bf_read:
 bf_read_loop:
     movq $0, %rax           # Read flag
     movq $0, %rdi           # stdin file descriptor
-    movq $2, %rdx           # max size
+    movq $1, %rdx           # max size
     subq $16, %rsp          # Allocate two bytes for temporary storage of the read value
-    # when we read something the first char is what we need, and the second one is \n which we ignore
+    # when we read single byte, it is the char that we want to put into the memory
     movq %rsp, %rsi         # Address of the buffer
 # TODO: correct reading of chars
     syscall
-    
     movb (%rsp), %al      # Move the read value to the temporary register
+
+    cmpb $0, %al           # Check if everything works as expected
+    jl cannot_read_from_stdin # If there is an error, show error message and exit
+    
+    #cmpb $'\n', %al           # Check if we read a newline
+    #je bf_read_loop           # If we did, then read again
+
     movb %al, (%r13)       # Load value from the temporary register to the brainfuck memory
     addq $16, %rsp          # Deallocate the temporary storage
-    
-    cmpq $0, %rax           # Check if everything works as expected
-    jl cannot_read_from_stdin # If there is an error, show error message and exit
-    je nothing_in_stdin     # If there is nothing in stdin, show error message and exit (hmm?)
     
     decq %r15               # Decrement the counter
     cmpq $0, %r15           # Check if we are done

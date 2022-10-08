@@ -20,7 +20,7 @@
     
     _print: .asciz "\nmovq $1,%rax\nmovq $1,%rdi\nmovq $1,%rdx\nmovq %rbx,%rsi\nsyscall\n"
 
-    _read: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $2,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,(%rbx)\naddq $16,%rsp\n"
+    _read: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $1,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,(%rbx)\naddq $16,%rsp\n"
 
     _rbx: .asciz "%rbx"
     _rbx_wrapped: .asciz "(%rbx)"
