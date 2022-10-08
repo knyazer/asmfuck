@@ -5,6 +5,7 @@
 
 .text
     _mov: .asciz "\nmovb "
+    _movb: .asciz "\nmovb "
     _addb: .asciz "\naddb "
     _addq: .asciz "\naddq "
     _subb: .asciz "\nsubb "
@@ -17,41 +18,22 @@
     _colon: .asciz ":\n"
     _new_line: .asciz "\n"
     _loop_start_bp: .asciz "\ncmpb $0,(%rbx)\nje"
-    
     _print_1: .asciz "\nmovq $1,%rax\nmovq $1,%rdi\nmovq $1,%rdx\nmovq %rbx,%rsi\naddq $"
     _print_2: .asciz ", %rsi\nsyscall\n"
-
     _read_1: .asciz "\nmovq $0,%rax\nmovq $0,%rdi\nmovq $2,%rdx\nsubq $16,%rsp\nmovq %rsp,%rsi\nsyscall\nmovb (%rsp),%al\nmovb %al,"
     _read_2: .asciz "(%rbx)\naddq $16,%rsp\n"
-
     _rbx: .asciz "%rbx"
-
     _rbx_wrapped: .asciz "(%rbx)"
-    
+    _rbx_wrapped_nl: .asciz "(%rbx)\n"
     _intro: .asciz ".text\n.global _start\n_start:\npushq %rbp\nmovq %rsp,%rbp\nsubq $30000,%rsp\nmovq %rsp,%rbx"
-    
     _outro: .asciz "\nmovq %rbp,%rsp\npopq %rbp\nmovq $60, %rax\nmovq $0,%rdi\nsyscall\n"
-
-    _complex_mul: .asciz "movb (%rbx),\n"
-    
-    _complex_start: .asciz "movb (%rbx),%r15b\n"
-
-    _complex_zero: .asciz "movb $0, (%rbx)\n"
-
-    _complex_mul_1: .asciz "movb $0x"
-
-    _complex_mul_2: .asciz ", %al\nmulb %r15b\naddb %al, (%rbx)\n"
-
-    _complex_sub_mul_1: .asciz "movb $0x"
-
-    _complex_sub_mul_2: .asciz ", %al\nmulb %r15b\nsubb %al, (%rbx)\n"
-
-    _complex_single_mul: .asciz "addb %r15b, (%rbx)\n"
-
-    _complex_sub_single_mul: .asciz "subb %r15b, (%rbx)\n"
-
-
-
+    _complex_start_post: .asciz "(%rbx), %r15b\n"
+    _complex_mul_1: .asciz "mulb %r15b\naddb %al, "
+    _complex_mul_sub_1: .asciz "mulb %r15b\nsubb %al, "
+    _complex_single_mul_1: .asciz "addb %r15b, "
+    _complex_sub_single_mul_1: .asciz "subb %r15b, "
+    _complex_zero_1: .asciz "movb $0, "
+    _al: .asciz "%al"
 compile_to_string:
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
@@ -314,9 +296,21 @@ gen_complex_exit:
 # in complex loops no stuff with relative pointers is needed, as there are by definiton no arbitrary pointer movement
 gen_complex_start:
     # We want to put the current block value into %r15
-    # movzxb (%rbx), %r15b
+    # movb v%r14(%rbx), %r15b
     movq %r13, %rdi
-    movq $_complex_start, %rsi
+    movq $_movb, %rsi
+    call add_line
+    movq %rax, %r13
+    
+    # the offset for the current variable, stored in %r14
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset_wz
+    movq %rax, %r13
+    
+    # abd the (%rbx), %r15 part
+    movq %r13, %rdi
+    movq $_complex_start_post, %rsi
     call add_line
     movq %rax, %r13
 
@@ -333,19 +327,30 @@ gen_complex_mul:
     # Here we want to add to the current block r15 * repetitions
     # movb repetitons, %al
     # mulb %r15b
-    # addb %al, (%rbx)
+    # addb %al, v%r14(%rbx)
+    movq %r13, %rdi
+    movq $_movb, %rsi
+    movl %r15d, %edx
+    movq $_al, %rcx
+    movq $0, %r8 # offset
+    call construct_line
+    movq %rax, %r13
+
+    # mulb %r15b, addb %al, 
     movq %r13, %rdi
     movq $_complex_mul_1, %rsi
     call add_line
     movq %rax, %r13
 
+    # print the offset
     movq %r13, %rdi
-    movzxb %r15b, %rsi
-    call print_hex_to_address
+    movq %r14, %rsi
+    call print_offset
     movq %rax, %r13
-
+    
+    # (%rbx)
     movq %r13, %rdi
-    movq $_complex_mul_2, %rsi
+    movq $_rbx_wrapped_nl, %rsi
     call add_line
     movq %rax, %r13
 
@@ -355,19 +360,29 @@ gen_complex_sub_mul:
     # Here we want to subtract from the current block r15 * repetitions
     # movb repetitons, %al
     # mulb %r15b
-    # subb %al, (%rbx)
+    # addb %al, v%r14(%rbx)
+    movq $_movb, %rsi
+    movl %r15d, %edx
+    movq $_al, %rcx
+    movq $0, %r8 # offset
+    call construct_line
+    movq %rax, %r13
+
+    # mulb %r15b, sub %al, 
     movq %r13, %rdi
-    movq $_complex_sub_mul_1, %rsi
+    movq $_complex_mul_sub_1, %rsi
     call add_line
     movq %rax, %r13
 
+    # print the offset
     movq %r13, %rdi
-    movzxb %r15b, %rsi
-    call print_hex_to_address
+    movq %r14, %rsi
+    call print_offset
     movq %rax, %r13
-
+    
+    # (%rbx)
     movq %r13, %rdi
-    movq $_complex_sub_mul_2, %rsi
+    movq $_rbx_wrapped_nl, %rsi
     call add_line
     movq %rax, %r13
 
@@ -376,31 +391,69 @@ gen_complex_sub_mul:
 gen_complex_single_mul:
     # Here we want to add to the current block r15, without repetitions
     # addb %r15b, (%rbx)
+    # addb %r15b, 
     movq %r13, %rdi
-    movq $_complex_single_mul, %rsi
+    movq $_complex_single_mul_1, %rsi
     call add_line
-
     movq %rax, %r13
+
+    # print the offset
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset
+    movq %rax, %r13
+
+    # (%rbx) 
+    movq %r13, %rdi
+    movq $_rbx_wrapped_nl, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
 gen_complex_sub_single_mul:
-    # Here we want to subtract r15 from the current block, without repetitions
+    # Here we want to add to the current block r15, without repetitions
     # subb %r15b, (%rbx)
+    # subb %r15b, 
     movq %r13, %rdi
-    movq $_complex_sub_single_mul, %rsi
+    movq $_complex_sub_single_mul_1, %rsi
     call add_line
-
     movq %rax, %r13
+
+    # print the offset
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset
+    movq %rax, %r13
+
+    # (%rbx) 
+    movq %r13, %rdi
+    movq $_rbx_wrapped_nl, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
 gen_complex_zero:
     # Here we want to set the current block to zero
     # movb $0, (%rbx)
     movq %r13, %rdi
-    movq $_complex_zero, %rsi
+    movq $_complex_zero_1, %rsi
     call add_line
-
     movq %rax, %r13
+
+    # print the offset
+    movq %r13, %rdi
+    movq %r14, %rsi
+    call print_offset
+    movq %rax, %r13
+
+    # (%rbx) 
+    movq %r13, %rdi
+    movq $_rbx_wrapped_nl, %rsi
+    call add_line
+    movq %rax, %r13
+
     jmp gen_main_loop
 
 

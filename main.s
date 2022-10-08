@@ -170,6 +170,9 @@ read_block:
     call rle_encode
     movq %rax, -32(%rbp)  # Save the pointer to the end of the rle compressed code
     
+    # First parameter is the address of RLE compressed program, second parameter is the address of output
+    movq -16(%rbp), %rdi
+    call leaf_optimization
 
     # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
     movq $0x200000, %rdi    # Size of the memory to allocate
@@ -262,9 +265,6 @@ read_block:
 
 # This stage of optimization of the not nested loops is called leaf optimization, as these loops in the tree of loops are the leaves.
 
-    # First parameter is the address of RLE compressed program, second parameter is the address of output
-    movq -16(%rbp), %rdi
-    call leaf_optimization
 
     # skip the output, because we don't need it for release
     # remove the next line if you want to look to the code
