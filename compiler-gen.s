@@ -25,7 +25,7 @@
     _rbx: .asciz "%rbx"
     _rbx_wrapped: .asciz "(%rbx)"
     _rbx_wrapped_nl: .asciz "(%rbx)\n"
-    _intro: .asciz ".text\n.global _start\n_start:\npushq %rbp\nmovq %rsp,%rbp\nsubq $30000,%rsp\nmovq %rsp,%rbx"
+    _intro: .asciz ".text\n.global _start\n_start:\npushq %rbp\nmovq %rsp,%rbp\nsubq $30000,%rsp\nmovq %rsp,%rbx\n"
     _outro: .asciz "\nmovq %rbp,%rsp\npopq %rbp\nmovq $60, %rax\nmovq $0,%rdi\nsyscall\n"
     _complex_start_post: .asciz "(%rbx), %r15b\n"
     _complex_mul_1: .asciz "mulb %r15b\naddb %al, "

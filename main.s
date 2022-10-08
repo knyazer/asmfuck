@@ -175,7 +175,7 @@ read_block:
     call leaf_optimization
 
     # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
-    movq $0x200000, %rdi    # Size of the memory to allocate
+    movq $0x2000000, %rdi    # Size of the memory to allocate
     call malloc
     movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
     # rdi - address of first block, rsi - address of the output
@@ -195,7 +195,6 @@ read_block:
     # Check if the rax is 0, if so - exit
     cmpq $0, %rax
     je end
-
     #movq $1, %rax           # Write flag
     #movq $1, %rdi           # stdout file descriptor
     #leaq -2000000(%rbp), %rsi         # pointer to the string
