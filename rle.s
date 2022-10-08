@@ -43,17 +43,12 @@ rle_encode_loop_first_char_search:
     incq %rdi
     jmp rle_encode_loop_first_char_search
     
-rle_encode_loop_char_continue:
-    # Now we have found the character for the first block
-    movq $0, (%rsi)
-    movb %al, 4(%rsi)
-    movl $1, (%rsi)
-
     # Now we will iterate over all the characters in the raw string
 rle_encode_loop:
     # increase the character ptr %rdi
     incq %rdi
     movb (%rdi), %al
+rle_encode_loop_char_continue:
 
     cmpb $'+', %al
     je rle_encode_loop_continue

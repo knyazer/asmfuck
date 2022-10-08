@@ -27,7 +27,7 @@ leaf_optimization:
     movq %rsp, %r14
     
 main_lo_loop:
-    # Put the current symbol into rax
+    # Put the current symbol into r9
     movb 4(%r12), %r9b
 
     cmpb $'[', %r9b
@@ -208,9 +208,12 @@ finish_lo_replacement_loop:
     # Now we are probably entirely done with the loop
     jmp lo_condition_end
 
-
-
 lo_opening_bracket:
+    movq %r12, %rax
+    call delay_removal
+    cmpq $0, %rax
+    je lo_condition_end
+
     # Set the flag 'nlf' for all the parent brackets, until bracket with the flag encountered
     jmp set_stack_brackets_nlf_flag 
 ret_ssbnf:
@@ -254,6 +257,84 @@ ssbnf_loop:
     jmp ssbnf_loop
 end_ssbnf:
     jmp ret_ssbnf
+
+# In hanoi there are delays which are of form 
+# [>[-]+[>[-]+[-]<-]<-]
+# which is equivalent to
+# 0>0>0
+delay_str: .asciz "[>[-]+[-]<-]"
+delay_removal:
+    pushq %rcx
+    pushq %rdx
+    pushq %r9
+    # Check that the loop is of form [>[-]+[>[-]+[-]<-]<-]
+    leaq 4(%rax), %rcx 
+    movq $delay_str, %rdx
+    
+delay_removal_loop:
+    cmpb $0, (%rdx)
+    je finalize_delay_removal
+    
+    movb (%rdx), %r9b
+    cmpb %r9b, (%rcx)
+    jne delay_removal_end
+    incq %rdx
+
+    cmpb $'[', (%rcx)
+    je delay_removal_inc
+    cmpb $']', (%rcx)
+    je delay_removal_inc
+    addq $8, %rcx
+    jmp delay_removal_loop
+
+delay_removal_inc:
+    addq $16, %rcx
+    jmp delay_removal_loop
+
+finalize_delay_removal:
+    movq $0, (%rax) #[
+    movq $0, 8(%rax) #[
+    movq $0, 16(%rax) #>
+    movq $0, 24(%rax) #[
+    movq $0, 32(%rax)#[
+    movq $0, 40(%rax)#-
+    movq $0, 48(%rax)#]
+    movq $0, 56(%rax)#]
+    movq $0, 64(%rax)#+
+    movq $0, 72(%rax)#[
+    movq $0, 80(%rax)#[
+    movq $0, 88(%rax)#-
+    movq $0, 96(%rax)#]
+    movq $0, 104(%rax)#]
+    movq $0, 112(%rax)#<
+    movq $0, 120(%rax)#-
+    movq $0, 128(%rax)#]
+    movq $0, 136(%rax)#]
+
+    movb $'0', 4(%rax)
+    movl $1, (%rax)
+
+    movb $'>', 12(%rax)
+    movl $1, 8(%rax)
+
+    movb $'0', 20(%rax)
+    movl $1, 16(%rax)
+
+    movb $'<', 28(%rax)
+    movl $1, 24(%rax)
+
+    movq $0, %rax
+    popq %r9
+    popq %rdx
+    popq %rcx
+    ret
+
+delay_removal_end:
+    movq $1, %rax
+    popq %r9
+    popq %rdx
+    popq %rcx
+    ret
 
 
 end_leaf_optimization:

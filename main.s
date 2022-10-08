@@ -113,18 +113,6 @@ main:
     subq $30064, %rax     # 30064 = 30000 + 64, 64 is the size of the local vars block
     movq %rax, -24(%rbp)
     
-    # Put brainfuck memory end at %r10
-    movq %rbp, %r10
-    subq $64, %r10
-
-    # Zerofy brainfuck memory
-zerofy_memory:
-    movq $0, (%rax)
-    addq $8, %rax
-    cmpq %rax, %r10 # Iterate until %rax == brainfuck memory end
-    jne zerofy_memory
-# TODO: .skip
-
     # Check that there is exactly one argument (argc = 2, first one is something like path or number, whatever)
     cmpq $2, %rdi
     jne more_than_one_arg
@@ -177,7 +165,12 @@ NO_LO:
 #jmp NO_COMPILATION
     # Now lets compile the thingy
     # First of all, allocate a huuuge chunk of memory for the compiled code via malloc
-    movq $0x800000, %rdi    # Size of the memory to allocate
+    movq -32(%rbp), %rdi
+    subq -16(%rbp), %rdi
+    movq $8, %rax
+    mulq %rdi
+    movq %rax, %rdi
+    addq $0x8000, %rdi
     call malloc
     movq %rax, -40(%rbp)  # Save the pointer to the beginning of the compiled code
 
@@ -270,7 +263,7 @@ NO_COMPILATION:
 
     # skip the output, because we don't need it for release
     # remove the next line if you want to look to the code
-#    jmp RLE_show_debug_end
+    jmp RLE_show_debug_end
     movq -16(%rbp), %rbx    # Store pointer to the current block in rbx, as it is callee saved
 looping_around_for_RLE_printing:
     movq $0, %rax           # Printf flag, no SIMD
@@ -304,7 +297,17 @@ not_skip_next_block:
     call printf
 RLE_show_debug_end:
 
-    # Otherwise, something failed along the way, so execute the interpreter
+    # Put brainfuck memory end at %r10
+    movq %rbp, %r10
+    subq $64, %r10
+
+    # Zerofy brainfuck memory
+    movq -24(%rbp), %rax
+zerofy_memory:
+    movq $0, (%rax)
+    addq $8, %rax
+    cmpq %rax, %r10 # Iterate until %rax == brainfuck memory end
+    jne zerofy_memory
 
 # And finally, start the interpretation
 start_the_execution:

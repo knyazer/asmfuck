@@ -19,9 +19,9 @@ filename: .asciz "/tmp/compiled_brainfuck_138047.s"
 sh_path: .asciz "/bin/sh"
 
 sh_arg_1: .asciz "-c"
-sh_arg_2: .asciz "as -o /tmp/compiled_brainfuck_138047.o /tmp/compiled_brainfuck_138047.s && ld -o /tmp/compiled_brainfuck_138047 /tmp/compiled_brainfuck_138047.o"
+sh_arg_2: .asciz "as -o /tmp/compiled_brainfuck_138047.o /tmp/compiled_brainfuck_138047.s 2> /dev/null && ld -o /tmp/compiled_brainfuck_138047 /tmp/compiled_brainfuck_138047.o 2> /dev/null"
 
-sh_arg_2_rm: .asciz "rxm -rf /tmp/compiled_brainfuck* 2> /dev/null"
+sh_arg_2_rm: .asciz "rm -rf /tmp/compiled_brainfuck* 2> /dev/null"
 
 executable_path: .asciz "/tmp/compiled_brainfuck_138047"
 
