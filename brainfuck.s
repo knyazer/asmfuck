@@ -74,16 +74,16 @@ brainfuck:
     #movq %rsp, %rsi
     
     # Save registers
-    pushq %rbx
-    pushq %rbx
     pushq %r12
     pushq %r13
     pushq %r14
     pushq %r15
+    pushq %rbx
+    pushq %rbx
 
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
-    
+
     subq $0x80000, %rsp    # Allocate 2 MB of memory on stack
     # The structure of stack is decently simple:
     # --------------------------------------------------   <- %rbp
@@ -117,7 +117,7 @@ brainfuck:
     
     # Setup brainfuck memory pointer, temporary register rax
     movq %rbp, %rax
-    subq $30064, %rax     # 30064 = 30000 + 64, 64 is the size of the local vars block
+    subq $30080, %rax     # 30064 = 30000 + 64, 64 is the size of the local vars block
     movq %rax, -24(%rbp)
     movq %rsp, -16(%rbp)
     
@@ -164,10 +164,6 @@ NO_LO:
     # First parameter is the address
     movq -40(%rbp), %rdi
     call compile_from_string
-
-    # Deallocate memo
-	movq -40(%rbp), %rdi
-	call free
 
     # Check if the rax is 0, if so - exit
     cmpq $0, %rax
@@ -463,21 +459,14 @@ bf_loop_end:
     
 post_execution:
     # Clean up the stack
-    movq %rbp, %rsp
-    popq %rbp
-
     jmp end
 
 # Different variants of how we can exit
 
 end:
-    mov     $60, %rax               # system call 60 is exit
-    movq $0, %rdi              # we want return code 0
     jmp end_brainfuck#call exit #syscall 
 
 fail:
-    movq $1, %rdi
-    mov $60, %rax
     jmp end_brainfuck#call exit #syscall
 
 # Some error messages
@@ -530,10 +519,10 @@ incomplete_loop:
 end_brainfuck:
     movq %rbp, %rsp
     popq %rbp
-    popq %r15
-    popq %r14
-    popq %r13
+    popq %rbx
+    popq %rbx
     popq %r12
-    popq %rbx
-    popq %rbx
+    popq %r13
+    popq %r14
+    popq %r15
     ret

@@ -1,5 +1,3 @@
-###################################### BRAINFUCK MAIN FILE #########################
-
 # Brainfuck compiler, optimized
 /* vim: set filetype=gas : */
 # TODO: advanced compiling, loop isolation, writing intermediate code representation into separate files
@@ -70,16 +68,16 @@ brainfuck:
     #movq %rsp, %rsi
     
     # Save registers
-    pushq %rbx
-    pushq %rbx
     pushq %r12
     pushq %r13
     pushq %r14
     pushq %r15
+    pushq %rbx
+    pushq %rbx
 
     pushq %rbp              # Push base pointer to stack
     movq %rsp, %rbp         # Base pointer = stack pointer 
-    
+
     subq $0x80000, %rsp    # Allocate 2 MB of memory on stack
     # The structure of stack is decently simple:
     # --------------------------------------------------   <- %rbp
@@ -113,7 +111,7 @@ brainfuck:
     
     # Setup brainfuck memory pointer, temporary register rax
     movq %rbp, %rax
-    subq $30064, %rax     # 30064 = 30000 + 64, 64 is the size of the local vars block
+    subq $30080, %rax     # 30064 = 30000 + 64, 64 is the size of the local vars block
     movq %rax, -24(%rbp)
     movq %rsp, -16(%rbp)
     
@@ -160,10 +158,6 @@ NO_LO:
     # First parameter is the address
     movq -40(%rbp), %rdi
     call compile_from_string
-
-    # Deallocate memo
-	movq -40(%rbp), %rdi
-	call free
 
     # Check if the rax is 0, if so - exit
     cmpq $0, %rax
@@ -459,21 +453,14 @@ bf_loop_end:
     
 post_execution:
     # Clean up the stack
-    movq %rbp, %rsp
-    popq %rbp
-
     jmp end
 
 # Different variants of how we can exit
 
 end:
-    mov     $60, %rax               # system call 60 is exit
-    movq $0, %rdi              # we want return code 0
     jmp end_brainfuck#call exit #syscall 
 
 fail:
-    movq $1, %rdi
-    mov $60, %rax
     jmp end_brainfuck#call exit #syscall
 
 # Some error messages
@@ -526,542 +513,516 @@ incomplete_loop:
 end_brainfuck:
     movq %rbp, %rsp
     popq %rbp
+    popq %rbx
+    popq %rbx
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
+    ret
+# This file provides a function rle_encode which allows to encode the string using RLE
+/* vim: set filetype=gas : */
+
+.text
+
+# %rdi - first arg - pointer to the beginning of the raw string
+# %rsi - second arg - pointer to the beginning of the output
+rle_encode:
+    pushq %rbp
+    movq %rsp, %rbp
+    pushq %rbx
+    
+    # The block structure is as follows:
+    # [4 bytes] - number of repetitions
+    # [1 byte] - command
+    # [3 bytes] - reserved (padding to 8 bytes)
+
+    # Let rdi be the pointer to the current character of the raw string
+    # Let rsi be the pointer to the current block of the output
+    
+rle_encode_loop_first_char_search:
+    # If the current character is an incrorrect one, increase the %rdi
+    movb (%rdi), %al
+    
+    cmpb $'+', %al
+    je rle_encode_loop_char_continue
+    cmpb $'-', %al
+    je rle_encode_loop_char_continue
+    cmpb $'.', %al
+    je rle_encode_loop_char_continue
+    cmpb $',', %al
+    je rle_encode_loop_char_continue
+    cmpb $'[', %al
+    je rle_encode_loop_char_continue
+    cmpb $']', %al
+    je rle_encode_loop_char_continue
+    cmpb $'<', %al
+    je rle_encode_loop_char_continue
+    cmpb $'>', %al
+    je rle_encode_loop_char_continue
+    
+    # If none of the conditions met - just skip the currect character
+    incq %rdi
+    jmp rle_encode_loop_first_char_search
+    
+    # Now we will iterate over all the characters in the raw string
+rle_encode_loop:
+    # increase the character ptr %rdi
+    incq %rdi
+    movb (%rdi), %al
+rle_encode_loop_char_continue:
+
+    cmpb $'+', %al
+    je rle_encode_loop_continue
+    cmpb $'-', %al
+    je rle_encode_loop_continue
+    cmpb $'.', %al
+    je rle_encode_loop_continue
+    cmpb $',', %al
+    je rle_encode_loop_continue
+    cmpb $'[', %al
+    je rle_encode_open_bracket
+    cmpb $']', %al
+    je rle_encode_closed_bracket
+    cmpb $'<', %al
+    je rle_encode_loop_continue
+    cmpb $'>', %al
+    je rle_encode_loop_continue
+    cmpb $0, %al
+    je rle_encode_loop_end
+    
+    # If none of the conditions met - just skip the currect character
+    jmp rle_encode_loop
+    
+rle_encode_loop_continue:
+    # Check whether the current character is the same as in the current block
+    movb 4(%rsi), %bl
+    cmpb %bl, %al
+    jne rle_encode_loop_new_block # If not - create a new block
+    # Otherwise increase the counter by one and continue
+    incl (%rsi)
+    jmp rle_encode_loop
+
+rle_encode_loop_new_block:
+    # Create a new block
+    addq $8, %rsi
+    movq $0, (%rsi)
+    movb %al, 4(%rsi)
+    movl $1, (%rsi)
+    jmp rle_encode_loop
+
+
+rle_encode_open_bracket:
+    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
+    
+    # Setup current block
+    movq $0, (%rsi)
+    movb $'[', 4(%rsi)
+    movl $1, (%rsi)
+
+    # Save the current address of the block
+    pushq %rsi
+
+    # Allocate one additional quad after the current block
+    addq $8, %rsi
+    movq $0, (%rsi) # Clean it up
+    
+    # Create a new block
+    jmp rle_encode_loop
+
+rle_encode_closed_bracket:
+    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
+    
+    # Setup current block
+    movq $0, (%rsi)
+    movb $']', 4(%rsi)
+    movl $1, (%rsi)
+
+    # Restore the address of the block
+    popq %rdx
+    
+    # Put the current block address into the previously allocated block after open bracket
+    movq %rsi, 8(%rdx)
+    
+    
+    # Put the open bracket block address after current block
+    addq $8, %rsi
+    movq $0, (%rsi) # Clean it up
+    movq %rdx, (%rsi)
+
+    jmp rle_encode_loop
+
+
+rle_encode_loop_end:
+    # Add '$' as the last block
+    addq $8, %rsi
+    movq $0, (%rsi)
+    movb $'$', 4(%rsi)
+    movl $1, (%rsi)
+    
+    # Return the last address of the output, which is rsi + 8
+    addq $8, %rsi
+    movq %rsi, %rax
+
+    popq %rbx
+    movq %rbp, %rsp
+    popq %rbp
+    ret
+    
+# The leaf optimization thingy
+/* vim: set filetype=gas : */
+.text
+
+# It takes as input RLE encoded data, and transforms it inplace into more efficient code
+
+# First parameter is pointer to the start of RLE, second is pointer to the output
+leaf_optimization:
+    # Prologue
+    pushq %rbp
+    movq %rsp, %rbp
+
+    # Push all the registers, just in case
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    # iterate over the whole code, and count the brackets.
+    # At each closing bracket, check if the corresponding bracket has flag 'nlf' set. 'nlf' because 'not leaf'. 
+    # If it is set, just continue like nothing happened
+    # If it is not set, optimize the loop
+
+    # Let's store pointer to the current block in RLE in r12
+    movq %rdi, %r12
+    movq %rsp, %r14
+    
+main_lo_loop:
+    # Put the current symbol into r9
+    movb 4(%r12), %r9b
+
+    cmpb $'[', %r9b
+    je lo_opening_bracket
+
+    cmpb $']', %r9b
+    je lo_closing_bracket
+
+    cmpb $'$', %r9b
+    je end_leaf_optimization
+
+lo_condition_end:
+    # If it is not a bracket, then just move to the next block
+    addq $8, %r12
+
+    # Repeat the loop
+    jmp main_lo_loop
+
+found_leaf:
+    # Try to detect zeros
+#    jmp zero_detection
+#zero_detection_ret:
+    
+    # Count the arrows (total ptr change) in the loop
+    # Simultaneously calculate the iteration step of the counter
+    # Let the pointer to the inner-loop instruction be in rcx, as found leaf is called when the rcx points to the correct opening bracket.
+    # Lets store the current pointer delta (arrow sum) in rbx, and the counter step in rdx
+    movq %rcx, %r15 # Save the pointer to the opening bracket for future use
+    movq $0, %rdx
+    movq $0, %rbx
+    addq $8, %rcx
+
+lo_check_correctness_loop:
+    # Check that we haven't reached the closing bracket yet
+    cmpq %rcx, %r12
+    je finish_checking_correctness  # If we have reached the end, break the loop
+
+    # Save symbol in rax
+    movb 4(%rcx), %al
+    cmpb $'>', %al
+    je lo_arrow_right
+    cmpb $'<', %al
+    je lo_arrow_left
+    
+    # If there is an input into the loop - do not optimize the loop
+    cmpb $',', %al
+    je lo_condition_end
+    
+    # If there is an output from the loop - do not optimize
+    cmpb $'.', %al
+    je lo_condition_end
+
+    cmpq $0, %rbx   # Check that the arrow sum is zero
+    je lo_arrow_sum_is_zero 
+
+arrow_if_end:
+    addq $8, %rcx
+    jmp lo_check_correctness_loop
+
+lo_arrow_right:
+    addl (%rcx), %ebx
+    jmp arrow_if_end
+
+lo_arrow_left:
+    subl (%rcx), %ebx
+    jmp arrow_if_end
+
+lo_arrow_sum_is_zero:
+    cmpb $'+', %al
+    je lo_plus
+    cmpb $'-', %al
+    je lo_minus
+    jmp arrow_if_end
+
+lo_plus:
+    addl (%rcx), %edx
+    jmp arrow_if_end
+
+lo_minus:
+    subl (%rcx), %edx
+    jmp arrow_if_end
+
+
+finish_checking_correctness:    
+    cmpl $-1, %edx  # Check that the counter step is exactly -1
+    jne lo_condition_end # If condition is not met -> end the optimization of the loop
+
+    cmpl $0, %ebx    # Check that the arrow sum is zero
+    jne lo_condition_end # If condition is not met -> end the optimization of the loop
+    
+    # If we are here, then we have a loop which can be optimized
+
+    # The *optimization* routine is simple: we just replace brackets [] with parentheses (), + with *, - with /.    # Let's move the pointer to the [ in rax, and pointer to the ] in rbx
+    movq %r15, %rax
+    movq %r12, %rbx
+
+# Replace some specific patterns with commands, currently only "!".
+lo_replacement_pattern_detection:
+    # Detect 0 patter: [-]:
+    # Check that loop size = 1 (4 including brackets and pointer)
+    movq %rax, %rcx
+    addq $32, %rcx
+    cmpq %rcx, %rbx
+    jne lo_replacement_loop_prep # If the pattern length of loop is not 3, then just continue
+    
+    # Check that the only symbol in the loop is -
+    movb 20(%rax), %cl # 12 because 4 is the offset, 16 is the after next block
+    cmpb $'-', %cl
+    jne lo_replacement_loop_prep # If the symbol is not -, then just continue
+
+    # If all the conditions are met, then replace the loop with the command
+    # replace [ with 0 and 1 repetetion
+    movq $0, (%rax)
+    movb $'!', 4(%rax)
+    movl $1, (%rax)
+    # replace -,] and pointers with empty blocks
+    movq $0, 8(%rax)
+    movq $0, 16(%rax)
+    movq $0, 24(%rax)
+    movq $0, 32(%rax)
+
+    jmp finish_lo_replacement_loop
+
+lo_replacement_loop_prep:
+    # Not iterate over all the elements between the brackets, and replace them
+    # rcx is the counter, again
+    movq %rax, %rcx
+
+lo_replacement_loop:
+    # Check that we haven't reached the closing bracket yet    # Save symbol in r8
+    movb 4(%rcx), %r8b
+    cmpb $'[', %r8b
+    je lo_replacement_opening_bracket
+    cmpb $']', %r8b
+    je lo_replacement_closing_bracket
+    cmpb $'+', %r8b
+    je lo_replacement_plus
+    cmpb $'-', %r8b
+    je lo_replacement_minus
+
+lo_replacement_if_end:
+    # Check if we need to exit the loop
+    cmpq %rcx, %rbx
+    je finish_lo_replacement_loop  # If we have reached the end, break the loop
+    
+    addq $8, %rcx
+    jmp lo_replacement_loop
+
+
+lo_replacement_opening_bracket:
+    movb $'(', 4(%rcx)
+    addq $8, %rcx
+    jmp lo_replacement_if_end
+
+lo_replacement_closing_bracket:
+    movb $')', 4(%rcx)
+    addq $8, %rcx
+    jmp lo_replacement_if_end
+
+lo_replacement_plus:
+    cmpl $1, (%rcx)
+    movb $'a', 4(%rcx)
+    je lo_replacement_if_end
+    
+    movb $'*', 4(%rcx)
+    jmp lo_replacement_if_end
+
+lo_replacement_minus:
+    cmpl $1, (%rcx)
+    movb $'s', 4(%rcx)
+    je lo_replacement_if_end
+
+    movb $'/', 4(%rcx)
+    jmp lo_replacement_if_end
+
+
+finish_lo_replacement_loop:
+    # Now we are probably entirely done with the loop
+    jmp lo_condition_end
+
+lo_opening_bracket:
+    movq %r12, %rax
+    call delay_removal
+    cmpq $0, %rax
+    je lo_condition_end
+
+    # Set the flag 'nlf' for all the parent brackets, until bracket with the flag encountered
+    jmp set_stack_brackets_nlf_flag 
+ret_ssbnf:
+    # If it is an opening bracket, then push the pointer to it to the stack, twice for the stack to be aligned
+    pushq %r12
+    pushq %r12
+
+    addq $8, %r12 # Skip the block with address
+    jmp lo_condition_end
+
+
+lo_closing_bracket:
+    # If it is a closing bracket, we can check that the corresponding bracket flag just jumping to it, as pointer to the opening bracket is in the next cell
+    addq $8, %r12 # Move to the next cell
+    movq (%r12), %rcx # Load the pointer to the opening bracket
+    # Check that 'nlf' flag is not set
+    cmpb $0, 5(%rcx)
+    je found_leaf   # If so jump to subroutine 'found_leaf'
+    # otherwise, do nothing, and continue
+    jmp lo_condition_end
+
+set_stack_brackets_nlf_flag:
+    # pointer to the current bracket is rsp
+    # r8 will be iterator
+    movq %rsp, %r8
+ssbnf_loop:
+
+    cmpq %r8, %r14     # if we are at the end of the brackets list, then we are done
+    je end_ssbnf      # otherwise, continue setting
+
+    # Load the address of the current bracket block into rdx
+    movq (%r8), %rdx
+
+    cmpb $1, 5(%rdx)    # $1 is nlf flag
+    je end_ssbnf        # if it is set, then we are done
+    
+    # otherwise, set the flag and increase the counter by 16, as the values aligned to 16 bytes
+    movb $1, 5(%rdx)
+    addq $16, %r8
+    
+    jmp ssbnf_loop
+end_ssbnf:
+    jmp ret_ssbnf
+
+# In hanoi there are delays which are of form 
+# [>[-]+[>[-]+[-]<-]<-]
+# which is equivalent to
+# 0>0>0
+delay_str: .asciz "[>[-]+[-]<-]"
+delay_removal:
+    pushq %rcx
+    pushq %rdx
+    pushq %r9
+    # Check that the loop is of form [>[-]+[>[-]+[-]<-]<-]
+    leaq 4(%rax), %rcx 
+    movq $delay_str, %rdx
+    
+delay_removal_loop:
+    cmpb $0, (%rdx)
+    je finalize_delay_removal
+    
+    movb (%rdx), %r9b
+    cmpb %r9b, (%rcx)
+    jne delay_removal_end
+    incq %rdx
+
+    cmpb $'[', (%rcx)
+    je delay_removal_inc
+    cmpb $']', (%rcx)
+    je delay_removal_inc
+    addq $8, %rcx
+    jmp delay_removal_loop
+
+delay_removal_inc:
+    addq $16, %rcx
+    jmp delay_removal_loop
+
+finalize_delay_removal:
+    movq $0, (%rax) #[
+    movq $0, 8(%rax) #[
+    movq $0, 16(%rax) #>
+    movq $0, 24(%rax) #[
+    movq $0, 32(%rax)#[
+    movq $0, 40(%rax)#-
+    movq $0, 48(%rax)#]
+    movq $0, 56(%rax)#]
+    movq $0, 64(%rax)#+
+    movq $0, 72(%rax)#[
+    movq $0, 80(%rax)#[
+    movq $0, 88(%rax)#-
+    movq $0, 96(%rax)#]
+    movq $0, 104(%rax)#]
+    movq $0, 112(%rax)#<
+    movq $0, 120(%rax)#-
+    movq $0, 128(%rax)#]
+    movq $0, 136(%rax)#]
+
+    movb $'0', 4(%rax)
+    movl $1, (%rax)
+
+    movb $'>', 12(%rax)
+    movl $1, 8(%rax)
+
+    movb $'0', 20(%rax)
+    movl $1, 16(%rax)
+
+    movb $'<', 28(%rax)
+    movl $1, 24(%rax)
+
+    movq $0, %rax
+    popq %r9
+    popq %rdx
+    popq %rcx
+    ret
+
+delay_removal_end:
+    movq $1, %rax
+    popq %r9
+    popq %rdx
+    popq %rcx
+    ret
+
+
+end_leaf_optimization:
+    # Set the rax to the pointer to the last block
+    movq %r12, %rax
+
+    # Epilogue
     popq %r15
     popq %r14
     popq %r13
     popq %r12
     popq %rbx
-    popq %rbx
+    
+    movq %rbp, %rsp
+    popq %rbp
+
     ret
-
-
-################################# JUMPTABLE 1 #################################
-
-.text
-
-jumptable_gen:
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_complex_zero
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_complex_exit
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_complex_start
-    .quad gen_complex_end
-    .quad gen_complex_mul
-    .quad gen_add
-    .quad gen_read
-    .quad gen_sub
-    .quad gen_print
-    .quad gen_complex_sub_mul
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_left
-    .quad gen_main_loop
-    .quad gen_right
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_loop_start
-    .quad gen_main_loop
-    .quad gen_loop_end
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_complex_single_mul
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_complex_sub_single_mul
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-    .quad gen_main_loop
-
-
-######################### JUMPTABLE 2 ############################################
-.text
-
-jumptable:
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_complex_zero
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_complex_exit
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_complex_start
-    .quad bf_complex_end
-    .quad bf_complex_mul
-    .quad bf_add
-    .quad bf_read
-    .quad bf_sub
-    .quad bf_print
-    .quad bf_complex_sub_mul
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_left
-    .quad looping_around_for_execution
-    .quad bf_right
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_loop_start
-    .quad looping_around_for_execution
-    .quad bf_loop_end
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_complex_single_mul
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad bf_complex_sub_single_mul
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-    .quad looping_around_for_execution
-
-
-################################### COMPILER EXECUTOR ########################################
-
 # This program takes an assebmly file input, and generates an executable, giving its path in %rax, or $-1 if something failed along the way
 /* vim: set filetype=gas : */
 
@@ -1278,11 +1239,9 @@ success:
     movq $0, %rax
     jmp compiler_exec_end
 
-
-#################################### COMPILER GENERATOR ####################################
-
 # This function takes a pointer to the compressed brainfuck representation, and pointer to the location where we want to put our output, and produces assembly code for it at the specified location
 /* vim: set filetype=gas : */
+
 
 .text
     _mov: .asciz "movb "
@@ -1987,513 +1946,523 @@ done:
     movq %rbp, %rsp         # Stack pointer = base pointer
     popq %rbp               # Restore base pointer
     ret
-
-
-############################ LEAF OPTIMIZATION #############################
-
-# The leaf optimization thingy
-/* vim: set filetype=gas : */
 .text
 
-# It takes as input RLE encoded data, and transforms it inplace into more efficient code
-
-# First parameter is pointer to the start of RLE, second is pointer to the output
-leaf_optimization:
-    # Prologue
-    pushq %rbp
-    movq %rsp, %rbp
-
-    # Push all the registers, just in case
-    pushq %rbx
-    pushq %r12
-    pushq %r13
-    pushq %r14
-    pushq %r15
-
-    # iterate over the whole code, and count the brackets.
-    # At each closing bracket, check if the corresponding bracket has flag 'nlf' set. 'nlf' because 'not leaf'. 
-    # If it is set, just continue like nothing happened
-    # If it is not set, optimize the loop
-
-    # Let's store pointer to the current block in RLE in r12
-    movq %rdi, %r12
-    movq %rsp, %r14
-    
-main_lo_loop:
-    # Put the current symbol into r9
-    movb 4(%r12), %r9b
-
-    cmpb $'[', %r9b
-    je lo_opening_bracket
-
-    cmpb $']', %r9b
-    je lo_closing_bracket
-
-    cmpb $'$', %r9b
-    je end_leaf_optimization
-
-lo_condition_end:
-    # If it is not a bracket, then just move to the next block
-    addq $8, %r12
-
-    # Repeat the loop
-    jmp main_lo_loop
-
-found_leaf:
-    # Try to detect zeros
-#    jmp zero_detection
-#zero_detection_ret:
-    
-    # Count the arrows (total ptr change) in the loop
-    # Simultaneously calculate the iteration step of the counter
-    # Let the pointer to the inner-loop instruction be in rcx, as found leaf is called when the rcx points to the correct opening bracket.
-    # Lets store the current pointer delta (arrow sum) in rbx, and the counter step in rdx
-    movq %rcx, %r15 # Save the pointer to the opening bracket for future use
-    movq $0, %rdx
-    movq $0, %rbx
-    addq $8, %rcx
-
-lo_check_correctness_loop:
-    # Check that we haven't reached the closing bracket yet
-    cmpq %rcx, %r12
-    je finish_checking_correctness  # If we have reached the end, break the loop
-
-    # Save symbol in rax
-    movb 4(%rcx), %al
-    cmpb $'>', %al
-    je lo_arrow_right
-    cmpb $'<', %al
-    je lo_arrow_left
-    
-    # If there is an input into the loop - do not optimize the loop
-    cmpb $',', %al
-    je lo_condition_end
-    
-    # If there is an output from the loop - do not optimize
-    cmpb $'.', %al
-    je lo_condition_end
-
-    cmpq $0, %rbx   # Check that the arrow sum is zero
-    je lo_arrow_sum_is_zero 
-
-arrow_if_end:
-    addq $8, %rcx
-    jmp lo_check_correctness_loop
-
-lo_arrow_right:
-    addl (%rcx), %ebx
-    jmp arrow_if_end
-
-lo_arrow_left:
-    subl (%rcx), %ebx
-    jmp arrow_if_end
-
-lo_arrow_sum_is_zero:
-    cmpb $'+', %al
-    je lo_plus
-    cmpb $'-', %al
-    je lo_minus
-    jmp arrow_if_end
-
-lo_plus:
-    addl (%rcx), %edx
-    jmp arrow_if_end
-
-lo_minus:
-    subl (%rcx), %edx
-    jmp arrow_if_end
-
-
-finish_checking_correctness:    
-    cmpl $-1, %edx  # Check that the counter step is exactly -1
-    jne lo_condition_end # If condition is not met -> end the optimization of the loop
-
-    cmpl $0, %ebx    # Check that the arrow sum is zero
-    jne lo_condition_end # If condition is not met -> end the optimization of the loop
-    
-    # If we are here, then we have a loop which can be optimized
-
-    # The *optimization* routine is simple: we just replace brackets [] with parentheses (), + with *, - with /.    # Let's move the pointer to the [ in rax, and pointer to the ] in rbx
-    movq %r15, %rax
-    movq %r12, %rbx
-
-# Replace some specific patterns with commands, currently only "!".
-lo_replacement_pattern_detection:
-    # Detect 0 patter: [-]:
-    # Check that loop size = 1 (4 including brackets and pointer)
-    movq %rax, %rcx
-    addq $32, %rcx
-    cmpq %rcx, %rbx
-    jne lo_replacement_loop_prep # If the pattern length of loop is not 3, then just continue
-    
-    # Check that the only symbol in the loop is -
-    movb 20(%rax), %cl # 12 because 4 is the offset, 16 is the after next block
-    cmpb $'-', %cl
-    jne lo_replacement_loop_prep # If the symbol is not -, then just continue
-
-    # If all the conditions are met, then replace the loop with the command
-    # replace [ with 0 and 1 repetetion
-    movq $0, (%rax)
-    movb $'!', 4(%rax)
-    movl $1, (%rax)
-    # replace -,] and pointers with empty blocks
-    movq $0, 8(%rax)
-    movq $0, 16(%rax)
-    movq $0, 24(%rax)
-    movq $0, 32(%rax)
-
-    jmp finish_lo_replacement_loop
-
-lo_replacement_loop_prep:
-    # Not iterate over all the elements between the brackets, and replace them
-    # rcx is the counter, again
-    movq %rax, %rcx
-
-lo_replacement_loop:
-    # Check that we haven't reached the closing bracket yet    # Save symbol in r8
-    movb 4(%rcx), %r8b
-    cmpb $'[', %r8b
-    je lo_replacement_opening_bracket
-    cmpb $']', %r8b
-    je lo_replacement_closing_bracket
-    cmpb $'+', %r8b
-    je lo_replacement_plus
-    cmpb $'-', %r8b
-    je lo_replacement_minus
-
-lo_replacement_if_end:
-    # Check if we need to exit the loop
-    cmpq %rcx, %rbx
-    je finish_lo_replacement_loop  # If we have reached the end, break the loop
-    
-    addq $8, %rcx
-    jmp lo_replacement_loop
-
-
-lo_replacement_opening_bracket:
-    movb $'(', 4(%rcx)
-    addq $8, %rcx
-    jmp lo_replacement_if_end
-
-lo_replacement_closing_bracket:
-    movb $')', 4(%rcx)
-    addq $8, %rcx
-    jmp lo_replacement_if_end
-
-lo_replacement_plus:
-    cmpl $1, (%rcx)
-    movb $'a', 4(%rcx)
-    je lo_replacement_if_end
-    
-    movb $'*', 4(%rcx)
-    jmp lo_replacement_if_end
-
-lo_replacement_minus:
-    cmpl $1, (%rcx)
-    movb $'s', 4(%rcx)
-    je lo_replacement_if_end
-
-    movb $'/', 4(%rcx)
-    jmp lo_replacement_if_end
-
-
-finish_lo_replacement_loop:
-    # Now we are probably entirely done with the loop
-    jmp lo_condition_end
-
-lo_opening_bracket:
-    movq %r12, %rax
-    call delay_removal
-    cmpq $0, %rax
-    je lo_condition_end
-
-    # Set the flag 'nlf' for all the parent brackets, until bracket with the flag encountered
-    jmp set_stack_brackets_nlf_flag 
-ret_ssbnf:
-    # If it is an opening bracket, then push the pointer to it to the stack, twice for the stack to be aligned
-    pushq %r12
-    pushq %r12
-
-    addq $8, %r12 # Skip the block with address
-    jmp lo_condition_end
-
-
-lo_closing_bracket:
-    # If it is a closing bracket, we can check that the corresponding bracket flag just jumping to it, as pointer to the opening bracket is in the next cell
-    addq $8, %r12 # Move to the next cell
-    movq (%r12), %rcx # Load the pointer to the opening bracket
-    # Check that 'nlf' flag is not set
-    cmpb $0, 5(%rcx)
-    je found_leaf   # If so jump to subroutine 'found_leaf'
-    # otherwise, do nothing, and continue
-    jmp lo_condition_end
-
-set_stack_brackets_nlf_flag:
-    # pointer to the current bracket is rsp
-    # r8 will be iterator
-    movq %rsp, %r8
-ssbnf_loop:
-
-    cmpq %r8, %r14     # if we are at the end of the brackets list, then we are done
-    je end_ssbnf      # otherwise, continue setting
-
-    # Load the address of the current bracket block into rdx
-    movq (%r8), %rdx
-
-    cmpb $1, 5(%rdx)    # $1 is nlf flag
-    je end_ssbnf        # if it is set, then we are done
-    
-    # otherwise, set the flag and increase the counter by 16, as the values aligned to 16 bytes
-    movb $1, 5(%rdx)
-    addq $16, %r8
-    
-    jmp ssbnf_loop
-end_ssbnf:
-    jmp ret_ssbnf
-
-# In hanoi there are delays which are of form 
-# [>[-]+[>[-]+[-]<-]<-]
-# which is equivalent to
-# 0>0>0
-delay_str: .asciz "[>[-]+[-]<-]"
-delay_removal:
-    pushq %rcx
-    pushq %rdx
-    pushq %r9
-    # Check that the loop is of form [>[-]+[>[-]+[-]<-]<-]
-    leaq 4(%rax), %rcx 
-    movq $delay_str, %rdx
-    
-delay_removal_loop:
-    cmpb $0, (%rdx)
-    je finalize_delay_removal
-    
-    movb (%rdx), %r9b
-    cmpb %r9b, (%rcx)
-    jne delay_removal_end
-    incq %rdx
-
-    cmpb $'[', (%rcx)
-    je delay_removal_inc
-    cmpb $']', (%rcx)
-    je delay_removal_inc
-    addq $8, %rcx
-    jmp delay_removal_loop
-
-delay_removal_inc:
-    addq $16, %rcx
-    jmp delay_removal_loop
-
-finalize_delay_removal:
-    movq $0, (%rax) #[
-    movq $0, 8(%rax) #[
-    movq $0, 16(%rax) #>
-    movq $0, 24(%rax) #[
-    movq $0, 32(%rax)#[
-    movq $0, 40(%rax)#-
-    movq $0, 48(%rax)#]
-    movq $0, 56(%rax)#]
-    movq $0, 64(%rax)#+
-    movq $0, 72(%rax)#[
-    movq $0, 80(%rax)#[
-    movq $0, 88(%rax)#-
-    movq $0, 96(%rax)#]
-    movq $0, 104(%rax)#]
-    movq $0, 112(%rax)#<
-    movq $0, 120(%rax)#-
-    movq $0, 128(%rax)#]
-    movq $0, 136(%rax)#]
-
-    movb $'0', 4(%rax)
-    movl $1, (%rax)
-
-    movb $'>', 12(%rax)
-    movl $1, 8(%rax)
-
-    movb $'0', 20(%rax)
-    movl $1, 16(%rax)
-
-    movb $'<', 28(%rax)
-    movl $1, 24(%rax)
-
-    movq $0, %rax
-    popq %r9
-    popq %rdx
-    popq %rcx
-    ret
-
-delay_removal_end:
-    movq $1, %rax
-    popq %r9
-    popq %rdx
-    popq %rcx
-    ret
-
-
-end_leaf_optimization:
-    # Set the rax to the pointer to the last block
-    movq %r12, %rax
-
-    # Epilogue
-    popq %r15
-    popq %r14
-    popq %r13
-    popq %r12
-    popq %rbx
-    
-    movq %rbp, %rsp
-    popq %rbp
-
-    ret
-
-############################# RLE ########################################
-
-# This file provides a function rle_encode which allows to encode the string using RLE
-/* vim: set filetype=gas : */
+jumptable_gen:
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_complex_zero
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_complex_exit
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_complex_start
+    .quad gen_complex_end
+    .quad gen_complex_mul
+    .quad gen_add
+    .quad gen_read
+    .quad gen_sub
+    .quad gen_print
+    .quad gen_complex_sub_mul
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_left
+    .quad gen_main_loop
+    .quad gen_right
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_loop_start
+    .quad gen_main_loop
+    .quad gen_loop_end
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_complex_single_mul
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_complex_sub_single_mul
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
+    .quad gen_main_loop
 
 .text
 
-# %rdi - first arg - pointer to the beginning of the raw string
-# %rsi - second arg - pointer to the beginning of the output
-rle_encode:
-    pushq %rbp
-    movq %rsp, %rbp
-    pushq %rbx
-    
-    # The block structure is as follows:
-    # [4 bytes] - number of repetitions
-    # [1 byte] - command
-    # [3 bytes] - reserved (padding to 8 bytes)
+jumptable:
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_complex_zero
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_complex_exit
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_complex_start
+    .quad bf_complex_end
+    .quad bf_complex_mul
+    .quad bf_add
+    .quad bf_read
+    .quad bf_sub
+    .quad bf_print
+    .quad bf_complex_sub_mul
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_left
+    .quad looping_around_for_execution
+    .quad bf_right
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_loop_start
+    .quad looping_around_for_execution
+    .quad bf_loop_end
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_complex_single_mul
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad bf_complex_sub_single_mul
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
+    .quad looping_around_for_execution
 
-    # Let rdi be the pointer to the current character of the raw string
-    # Let rsi be the pointer to the current block of the output
-    
-rle_encode_loop_first_char_search:
-    # If the current character is an incrorrect one, increase the %rdi
-    movb (%rdi), %al
-    
-    cmpb $'+', %al
-    je rle_encode_loop_char_continue
-    cmpb $'-', %al
-    je rle_encode_loop_char_continue
-    cmpb $'.', %al
-    je rle_encode_loop_char_continue
-    cmpb $',', %al
-    je rle_encode_loop_char_continue
-    cmpb $'[', %al
-    je rle_encode_loop_char_continue
-    cmpb $']', %al
-    je rle_encode_loop_char_continue
-    cmpb $'<', %al
-    je rle_encode_loop_char_continue
-    cmpb $'>', %al
-    je rle_encode_loop_char_continue
-    
-    # If none of the conditions met - just skip the currect character
-    incq %rdi
-    jmp rle_encode_loop_first_char_search
-    
-    # Now we will iterate over all the characters in the raw string
-rle_encode_loop:
-    # increase the character ptr %rdi
-    incq %rdi
-    movb (%rdi), %al
-rle_encode_loop_char_continue:
-
-    cmpb $'+', %al
-    je rle_encode_loop_continue
-    cmpb $'-', %al
-    je rle_encode_loop_continue
-    cmpb $'.', %al
-    je rle_encode_loop_continue
-    cmpb $',', %al
-    je rle_encode_loop_continue
-    cmpb $'[', %al
-    je rle_encode_open_bracket
-    cmpb $']', %al
-    je rle_encode_closed_bracket
-    cmpb $'<', %al
-    je rle_encode_loop_continue
-    cmpb $'>', %al
-    je rle_encode_loop_continue
-    cmpb $0, %al
-    je rle_encode_loop_end
-    
-    # If none of the conditions met - just skip the currect character
-    jmp rle_encode_loop
-    
-rle_encode_loop_continue:
-    # Check whether the current character is the same as in the current block
-    movb 4(%rsi), %bl
-    cmpb %bl, %al
-    jne rle_encode_loop_new_block # If not - create a new block
-    # Otherwise increase the counter by one and continue
-    incl (%rsi)
-    jmp rle_encode_loop
-
-rle_encode_loop_new_block:
-    # Create a new block
-    addq $8, %rsi
-    movq $0, (%rsi)
-    movb %al, 4(%rsi)
-    movl $1, (%rsi)
-    jmp rle_encode_loop
-
-
-rle_encode_open_bracket:
-    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
-    
-    # Setup current block
-    movq $0, (%rsi)
-    movb $'[', 4(%rsi)
-    movl $1, (%rsi)
-
-    # Save the current address of the block
-    pushq %rsi
-
-    # Allocate one additional quad after the current block
-    addq $8, %rsi
-    movq $0, (%rsi) # Clean it up
-    
-    # Create a new block
-    jmp rle_encode_loop
-
-rle_encode_closed_bracket:
-    addq $8, %rsi # Add 8 to rsi so now it points directly to the bracket block
-    
-    # Setup current block
-    movq $0, (%rsi)
-    movb $']', 4(%rsi)
-    movl $1, (%rsi)
-
-    # Restore the address of the block
-    popq %rdx
-    
-    # Put the current block address into the previously allocated block after open bracket
-    movq %rsi, 8(%rdx)
-    
-    
-    # Put the open bracket block address after current block
-    addq $8, %rsi
-    movq $0, (%rsi) # Clean it up
-    movq %rdx, (%rsi)
-
-    jmp rle_encode_loop
-
-
-rle_encode_loop_end:
-    # Add '$' as the last block
-    addq $8, %rsi
-    movq $0, (%rsi)
-    movb $'$', 4(%rsi)
-    movl $1, (%rsi)
-    
-    # Return the last address of the output, which is rsi + 8
-    addq $8, %rsi
-    movq %rsi, %rax
-
-    popq %rbx
-    movq %rbp, %rsp
-    popq %rbp
-    ret
-    
